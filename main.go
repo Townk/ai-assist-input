@@ -40,13 +40,16 @@ func initialModel(value, header string) model {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorMauve)).
 		Padding(0, 1)
-	s.Focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color(colorSurface0))
+	// No cursor-line highlight — keep the editing area a single uniform color.
+	s.Focused.CursorLine = lipgloss.NewStyle()
+	s.Blurred.CursorLine = lipgloss.NewStyle()
 	s.Blurred.Text = base
 	s.Blurred.Base = lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorSurface0)).
 		Padding(0, 1)
 	ta.SetStyles(s)
+	ta.Prompt = "" // no per-line prompt column (the "inner left border")
 
 	if value != "" {
 		ta.SetValue(value)
@@ -77,10 +80,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case key.Code == tea.KeyEnter && key.Mod.Contains(tea.ModShift):
-			// Shift+Enter: insert a newline into the textarea
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
+			// Shift+Enter: insert a newline explicitly. Forwarding the key to the
+			// textarea does nothing — its InsertNewline binding matches only plain
+			// Enter, not the shifted chord, so the textarea ignores it.
+			m.textarea.InsertRune('\n')
+			return m, nil
 		case key.Code == tea.KeyEnter:
 			// Plain Enter: submit
 			m.submitted = true
