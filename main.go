@@ -53,6 +53,11 @@ func initialModel(value, header string) model {
 		ta.MoveToEnd()
 	}
 
+	// Focus the textarea HERE, on the model NewProgram actually runs. Doing it
+	// in Init() focuses a discarded value-receiver copy instead, leaving the
+	// running textarea blurred — no cursor, no editing.
+	ta.Focus()
+
 	return model{
 		textarea: ta,
 		header:   header,
@@ -60,7 +65,7 @@ func initialModel(value, header string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.textarea.Focus())
+	return textarea.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
