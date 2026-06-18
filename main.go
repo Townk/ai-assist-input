@@ -191,7 +191,13 @@ func main() {
 		height = 1
 	}
 
-	finalModel, err := tea.NewProgram(initialModel(value, height)).Run()
+	// Render the TUI to stderr and keep stdout for the result only. Our caller
+	// (zellij-modal --capture) redirects this process's stdout to a file to
+	// capture the submitted text; if the TUI rendered to stdout, bubbletea would
+	// see a non-TTY stdout and exit immediately (the "popup blinks" bug). stderr
+	// stays attached to the pane's tty in both the capture path and the inline
+	// fallback, so the UI shows there and the result goes to stdout.
+	finalModel, err := tea.NewProgram(initialModel(value, height), tea.WithOutput(os.Stderr)).Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
 		os.Exit(1)
