@@ -12,9 +12,10 @@ import (
 
 // Catppuccin Mocha palette
 const (
-	colorMauve   = "#cba6f7"
-	colorText    = "#cdd6f4"
+	colorMauve    = "#cba6f7"
+	colorText     = "#cdd6f4"
 	colorSurface0 = "#313244"
+	colorOverlay0 = "#6c7086"
 )
 
 type model struct {
@@ -52,8 +53,6 @@ func initialModel(value, header string) model {
 		ta.MoveToEnd()
 	}
 
-	ta.Focus() //nolint:errcheck // returns a Cmd we'll send in Init
-
 	return model{
 		textarea: ta,
 		header:   header,
@@ -61,7 +60,7 @@ func initialModel(value, header string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, m.textarea.Focus())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -107,7 +106,7 @@ func (m model) View() tea.View {
 
 	if !m.quitting {
 		hint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorSurface0)).
+			Foreground(lipgloss.Color(colorOverlay0)).
 			Render("  enter: submit • shift+enter: newline • esc: cancel")
 		content += "\n" + hint
 	}
