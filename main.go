@@ -15,8 +15,9 @@ import (
 const (
 	colorMauve    = "#cba6f7"
 	colorText     = "#cdd6f4"
-	colorSurface0 = "#313244"
+	colorSurface0 = "#313244" // dark grey — scroll track
 	colorOverlay0 = "#6c7086"
+	colorOverlay1 = "#7f849c" // lighter grey — scroll thumb
 )
 
 // Frame budget: how many cells the chrome takes out of the pane.
@@ -145,7 +146,7 @@ func scrollbar(m model) string {
 	}
 
 	track := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface0))
-	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMauve))
+	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay1))
 	rows := make([]string, h)
 	for i := range rows {
 		if i >= pos && i < pos+thumb {
