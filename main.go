@@ -20,23 +20,25 @@ const (
 	colorOverlay1 = "#7f849c" // lighter grey — scroll thumb
 )
 
-// Frame budget: how many cells the chrome takes out of the pane.
+// Width budget: cells the chrome takes out of the pane WIDTH. Height is NOT
+// derived from the pane — it comes from --height, so the popup can leave room
+// for the zellij-modal title block above us (sizing to the full pane height
+// would push that title out of the floating pane).
 const (
 	frameWidth = 2 // rounded border, left + right
 	framePad   = 2 // border padding, left + right
 	scrollCol  = 1 // scroll-indicator column
-	chromeRows = 3 // top + bottom border, plus the hint line below the box
 )
 
 type model struct {
 	textarea  textarea.Model
-	width     int
-	height    int
+	width     int // pane width (from WindowSizeMsg)
+	taHeight  int // textarea viewport rows (from --height; fixed)
 	submitted bool
 	quitting  bool
 }
 
-func initialModel(value string) model {
+func initialModel(value string, height int) model {
 	ta := textarea.New()
 	ta.Placeholder = ""
 	ta.ShowLineNumbers = false
@@ -65,35 +67,32 @@ func initialModel(value string) model {
 	// Focus the model NewProgram actually runs (not a discarded Init() copy).
 	ta.Focus()
 
-	// Sensible defaults until the first WindowSizeMsg sizes us to the pane.
+	// Height is fixed (from --height); width gets a default until the first
+	// WindowSizeMsg sizes us to the pane width.
 	ta.SetWidth(60)
-	ta.SetHeight(8)
+	ta.SetHeight(height)
 
-	return model{textarea: ta, width: 64, height: 11}
+	return model{textarea: ta, width: 64, taHeight: height}
 }
 
 func (m model) Init() tea.Cmd {
 	return textarea.Blink
 }
 
+// resize sets the textarea WIDTH from the pane; height stays fixed at taHeight.
 func (m *model) resize() {
 	innerW := m.width - frameWidth - framePad - scrollCol
 	if innerW < 1 {
 		innerW = 1
 	}
-	taH := m.height - chromeRows
-	if taH < 1 {
-		taH = 1
-	}
 	m.textarea.SetWidth(innerW)
-	m.textarea.SetHeight(taH)
+	m.textarea.SetHeight(m.taHeight)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.width = msg.Width // width only — height is fixed (--height)
 		m.resize()
 		return m, nil
 	case tea.KeyPressMsg:
@@ -179,15 +178,20 @@ func (m model) View() tea.View {
 
 func main() {
 	var value string
+	var height int
 	flag.StringVar(&value, "value", "", "initial textarea content")
+	flag.IntVar(&height, "height", 10, "textarea viewport height in rows (the popup sets this so the modal title stays visible)")
 	flag.Parse()
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: unexpected arguments: %v\n", flag.Args())
 		flag.Usage()
 		os.Exit(1)
 	}
+	if height < 1 {
+		height = 1
+	}
 
-	finalModel, err := tea.NewProgram(initialModel(value)).Run()
+	finalModel, err := tea.NewProgram(initialModel(value, height)).Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
 		os.Exit(1)
