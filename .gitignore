@@ -1,0 +1,2 @@
+# Compiled binary — a `go build` / `go install` artifact, not source.
+/ai-assist-input
