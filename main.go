@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 // Catppuccin Mocha palette
@@ -20,35 +21,47 @@ const (
 	colorOverlay1 = "#7f849c" // lighter grey — scroll thumb
 )
 
-// Width budget: cells the chrome takes out of the pane WIDTH. Height is NOT
-// derived from the pane — it comes from --height, so the popup can leave room
-// for the zellij-modal title block above us (sizing to the full pane height
-// would push that title out of the floating pane).
+// Layout. The modal is rendered entirely here (the wrapper just provides the
+// floating pane), top to bottom:
+//
+//	  ▓▓▓ <title>            title   — 2-col indent
+//	  ━━━…                   rule    — 2-col indent, (width-4) wide
+//	  ╭…╮                    box top — 2-col left margin
+//	  │ 󰧑  <text…>      ┃│   icon column + textarea + scroll column
+//	  ╰…╯
+//	    󰌑 : submit • …       hint    — aligned under the box content
+//
+// Width budget: cells the chrome takes out of the pane WIDTH around the textarea.
+// Height is fixed (from --height; see resize) so long content scrolls.
 const (
 	frameWidth = 2 // rounded border, left + right
 	framePad   = 2 // border padding, left + right
 	scrollCol  = 1 // scroll-indicator column
+	iconCol    = 3 // prompt-icon column ("󰧑" + 2-space gap)
+	boxMargin  = 2 // inset of the input box from each pane edge
 )
+
+const promptIcon = "󰧑"
 
 type model struct {
 	textarea  textarea.Model
+	title     string
 	width     int // pane width (from WindowSizeMsg)
 	taHeight  int // textarea viewport rows (from --height; fixed)
 	submitted bool
 	quitting  bool
 }
 
-func initialModel(value string, height int) model {
+func initialModel(value, title string, height int) model {
 	ta := textarea.New()
 	ta.Placeholder = ""
 	ta.ShowLineNumbers = false
 	ta.DynamicHeight = false // fixed viewport → long content scrolls, doesn't grow
-	ta.Prompt = ""           // no per-line prompt column (the "inner left border")
+	ta.Prompt = ""           // the prompt icon is rendered as a separate column in View
 
-	// The textarea is borderless; the model paints the rounded frame in View()
-	// so the scroll indicator can sit inside it. No cursor-line highlight either
-	// — the editing area stays one uniform color. No header: the zellij-modal
-	// title block already labels the popup, so a header here would be redundant.
+	// Borderless textarea; View() paints the rounded frame + the scroll column so
+	// they sit together. No cursor-line highlight — the editing area stays one
+	// uniform color.
 	s := textarea.DefaultDarkStyles()
 	text := lipgloss.NewStyle().Foreground(lipgloss.Color(colorText))
 	s.Focused.Base = lipgloss.NewStyle()
@@ -72,7 +85,7 @@ func initialModel(value string, height int) model {
 	ta.SetWidth(60)
 	ta.SetHeight(height)
 
-	return model{textarea: ta, width: 64, taHeight: height}
+	return model{textarea: ta, title: title, width: 64, taHeight: height}
 }
 
 func (m model) Init() tea.Cmd {
@@ -81,7 +94,7 @@ func (m model) Init() tea.Cmd {
 
 // resize sets the textarea WIDTH from the pane; height stays fixed at taHeight.
 func (m *model) resize() {
-	innerW := m.width - frameWidth - framePad - scrollCol
+	innerW := m.width - frameWidth - framePad - scrollCol - iconCol - 2*boxMargin
 	if innerW < 1 {
 		innerW = 1
 	}
@@ -157,19 +170,54 @@ func scrollbar(m model) string {
 	return strings.Join(rows, "\n")
 }
 
-func (m model) View() tea.View {
-	body := lipgloss.JoinHorizontal(lipgloss.Top, m.textarea.View(), scrollbar(m))
+// iconColumn renders the prompt-icon column beside the textarea: the icon on the
+// first row, blanks on the rest, so the input's continuation lines stay aligned
+// under the text rather than under the icon.
+func iconColumn(h int) string {
+	if h < 1 {
+		h = 1
+	}
+	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMauve)).Render(promptIcon)
+	rows := make([]string, h)
+	rows[0] = icon + "  " // icon (1 cell) + 2-space gap = iconCol wide
+	for i := 1; i < h; i++ {
+		rows[i] = strings.Repeat(" ", iconCol)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// render builds the full modal frame as a string (View wraps it; kept separate
+// so it's testable without a TTY).
+func (m model) render() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorMauve))
+	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay0))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay0))
+
+	indent := strings.Repeat(" ", boxMargin)
+	ruleW := m.width - 2*boxMargin
+	if ruleW < 1 {
+		ruleW = 1
+	}
+	title := indent + titleStyle.Render("▓▓▓ "+m.title)
+	rule := indent + ruleStyle.Render(strings.Repeat("━", ruleW))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height()), m.textarea.View(), scrollbar(m))
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorMauve)).
 		Padding(0, 1).
+		MarginLeft(boxMargin).
 		Render(body)
 
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorOverlay0)).
-		Render("  󰌑: submit • 󰘶 󰌑: newline • 󱊷: cancel")
+	// Hint indent aligns under the box content: margin + left border + left pad.
+	hintIndent := strings.Repeat(" ", boxMargin+frameWidth/2+framePad/2)
+	hint := hintStyle.Render(hintIndent + "󰌑 : submit • 󰘶 󰌑 : newline • 󱊷 : cancel")
 
-	v := tea.NewView(box + "\n" + hint)
+	return title + "\n" + rule + "\n" + box + "\n" + hint
+}
+
+func (m model) View() tea.View {
+	v := tea.NewView(m.render())
 	// Kitty keyboard enhancements so Shift+Enter (delivered as \e[13;2u) is
 	// distinguishable from plain Enter.
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true}
@@ -177,10 +225,18 @@ func (m model) View() tea.View {
 }
 
 func main() {
-	var value string
+	// Force narrow (1-cell) accounting for East-Asian-ambiguous characters and
+	// nerd-font glyphs (the prompt/hint icons), so lipgloss's width matches what
+	// the terminal renders and the icon column stays aligned. Must run before any
+	// lipgloss call.
+	os.Setenv("RUNEWIDTH_EASTASIAN", "0")
+	runewidth.DefaultCondition.EastAsianWidth = false
+
+	var value, title string
 	var height int
 	flag.StringVar(&value, "value", "", "initial textarea content")
-	flag.IntVar(&height, "height", 10, "textarea viewport height in rows (the popup sets this so the modal title stays visible)")
+	flag.StringVar(&title, "title", "", "modal title shown above the input (e.g. \"ai-assist\")")
+	flag.IntVar(&height, "height", 10, "textarea viewport height in rows (the popup sets this so the modal fits the float)")
 	flag.Parse()
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: unexpected arguments: %v\n", flag.Args())
@@ -197,7 +253,7 @@ func main() {
 	// see a non-TTY stdout and exit immediately (the "popup blinks" bug). stderr
 	// stays attached to the pane's tty in both the capture path and the inline
 	// fallback, so the UI shows there and the result goes to stdout.
-	finalModel, err := tea.NewProgram(initialModel(value, height), tea.WithOutput(os.Stderr)).Run()
+	finalModel, err := tea.NewProgram(initialModel(value, title, height), tea.WithOutput(os.Stderr)).Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
 		os.Exit(1)
