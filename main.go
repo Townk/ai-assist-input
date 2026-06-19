@@ -9,16 +9,18 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 )
 
-// Catppuccin Mocha palette
+// Catppuccin Mocha palette. Border/rule/hint match the other floating dialogs
+// (pick-glyph): rule = Surface0, border + hint = Surface2.
 const (
-	colorMauve    = "#cba6f7"
-	colorText     = "#cdd6f4"
-	colorSurface0 = "#313244" // dark grey — scroll track
-	colorOverlay0 = "#6c7086"
-	colorOverlay1 = "#7f849c" // lighter grey — scroll thumb
+	colorMauve    = "#cba6f7" // title + prompt icon (accent)
+	colorText     = "#cdd6f4" // textarea text
+	colorSurface0 = "#313244" // title rule + scroll track
+	colorSurface2 = "#585b70" // input box border + hint text
+	colorOverlay1 = "#7f849c" // scroll thumb
 )
 
 // Layout. The modal is rendered entirely here (the wrapper just provides the
@@ -190,8 +192,8 @@ func iconColumn(h int) string {
 // so it's testable without a TTY).
 func (m model) render() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorMauve))
-	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay0))
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay0))
+	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface0))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface2))
 
 	indent := strings.Repeat(" ", boxMargin)
 	ruleW := m.width - 2*boxMargin
@@ -204,8 +206,8 @@ func (m model) render() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height()), m.textarea.View(), scrollbar(m))
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(colorMauve)).
-		Padding(0, 1).
+		BorderForeground(lipgloss.Color(colorSurface2)).
+		Padding(0, 0, 0, 1). // no right padding → the scroll column sits flush to the border
 		MarginLeft(boxMargin).
 		Render(body)
 
@@ -253,7 +255,16 @@ func main() {
 	// see a non-TTY stdout and exit immediately (the "popup blinks" bug). stderr
 	// stays attached to the pane's tty in both the capture path and the inline
 	// fallback, so the UI shows there and the result goes to stdout.
-	finalModel, err := tea.NewProgram(initialModel(value, title, height), tea.WithOutput(os.Stderr)).Run()
+	//
+	// Force TrueColor: over SSH / in zellij's pane, bubbletea's auto-detection
+	// underreports the color profile and downsamples the Catppuccin truecolor
+	// hexes to the nearest 256-color (e.g. #585b70 → #5f5f87). The terminal is
+	// truecolor-capable, so pin it (same fix the pager uses).
+	finalModel, err := tea.NewProgram(
+		initialModel(value, title, height),
+		tea.WithOutput(os.Stderr),
+		tea.WithColorProfile(colorprofile.TrueColor),
+	).Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
 		os.Exit(1)
