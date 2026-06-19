@@ -50,6 +50,24 @@ func TestPopupInputArea(t *testing.T) {
 	}
 }
 
+// TestScrollbarWrappedLines verifies the scrollbar reflects soft-wrapped rows,
+// not just logical lines: one long line (no newlines) that wraps past the
+// viewport must still show a thumb.
+func TestScrollbarWrappedLines(t *testing.T) {
+	m := initialModel(strings.Repeat("x", 200), "ai-assist", 3) // 1 logical line → ~5 wrapped rows at width 40
+	m.width = 53
+	m.resize()
+	if vc := visualLineCount(m); vc <= m.textarea.Height() {
+		t.Fatalf("visualLineCount = %d, want > %d (content wraps past the viewport)", vc, m.textarea.Height())
+	}
+	if m.textarea.LineCount() != 1 {
+		t.Fatalf("precondition: expected 1 logical line, got %d", m.textarea.LineCount())
+	}
+	if sb := scrollbar(m); !strings.Contains(sb, "┃") {
+		t.Fatalf("scrollbar should show a thumb for wrapped content, got %q", strip(sb))
+	}
+}
+
 // TestRenderFitsPane verifies no rendered line exceeds the pane width.
 func TestRenderFitsPane(t *testing.T) {
 	m := initialModel("a long enough value to exercise wrapping across the textarea width", "ai-assist", 4)

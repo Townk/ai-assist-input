@@ -136,15 +136,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// visualLineCount counts the wrapped (visual) rows the content occupies, so the
+// scrollbar reflects soft-wrapping rather than logical lines. The textarea's own
+// word-wrap is unexported, so this estimates each logical line's height as
+// ceil(displayWidth / textareaWidth); the caller clamps the total to the actual
+// scroll offset so the thumb is never inconsistent with what's on screen.
+func visualLineCount(m model) int {
+	w := m.textarea.Width()
+	if w < 1 {
+		return m.textarea.LineCount()
+	}
+	total := 0
+	for _, line := range strings.Split(m.textarea.Value(), "\n") {
+		rows := (lipgloss.Width(line) + w - 1) / w
+		if rows < 1 {
+			rows = 1
+		}
+		total += rows
+	}
+	return total
+}
+
 // scrollbar renders a single-column, viewport-height indicator beside the
 // textarea. It reserves the column with blanks when everything fits, and shows
-// a proportional mauve thumb once the content scrolls past the viewport.
+// a proportional thumb once the content (wrapped) scrolls past the viewport.
 func scrollbar(m model) string {
 	h := m.textarea.Height()
 	if h < 1 {
 		h = 1
 	}
-	total := m.textarea.LineCount()
+	off := m.textarea.ScrollYOffset()
+	total := visualLineCount(m)
+	if total < off+h { // never under-report vs the actual visual scroll position
+		total = off + h
+	}
 	if total <= h {
 		return strings.TrimRight(strings.Repeat(" \n", h), "\n")
 	}
@@ -156,7 +181,7 @@ func scrollbar(m model) string {
 	maxOff := total - h
 	pos := 0
 	if maxOff > 0 {
-		pos = (h - thumb) * m.textarea.ScrollYOffset() / maxOff
+		pos = (h - thumb) * off / maxOff
 	}
 
 	track := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface0))
