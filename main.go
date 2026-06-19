@@ -39,7 +39,8 @@ const (
 	frameWidth = 2 // rounded border, left + right
 	framePad   = 2 // border padding, left + right
 	scrollCol  = 1 // scroll-indicator column
-	iconCol    = 4 // prompt-icon column (1-space lead + "󰧑" + 2-space gap)
+	scrollGap  = 1 // space between the input text and the scroll column
+	iconCol    = 3 // prompt-icon column ("󰧑" + 2-space gap)
 	boxMargin  = 2 // inset of the input box from each pane edge
 )
 
@@ -96,7 +97,7 @@ func (m model) Init() tea.Cmd {
 
 // resize sets the textarea WIDTH from the pane; height stays fixed at taHeight.
 func (m *model) resize() {
-	innerW := m.width - frameWidth - framePad - scrollCol - iconCol - 2*boxMargin
+	innerW := m.width - frameWidth - framePad - scrollCol - scrollGap - iconCol - 2*boxMargin
 	if innerW < 1 {
 		innerW = 1
 	}
@@ -206,7 +207,7 @@ func iconColumn(h int) string {
 	}
 	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMauve)).Render(promptIcon)
 	rows := make([]string, h)
-	rows[0] = " " + icon + "  " // 1-space lead + icon (1 cell) + 2-space gap = iconCol wide
+	rows[0] = icon + "  " // icon (1 cell) + 2-space gap = iconCol wide (no leading space)
 	for i := 1; i < h; i++ {
 		rows[i] = strings.Repeat(" ", iconCol)
 	}
@@ -228,7 +229,11 @@ func (m model) render() string {
 	title := indent + titleStyle.Render("▓▓▓ "+m.title)
 	rule := indent + ruleStyle.Render(strings.Repeat("━", ruleW))
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height()), m.textarea.View(), scrollbar(m))
+	// A scrollGap-wide blank column keeps the input text off the scroll column
+	// (the icon + text shifted one column left; this absorbs the freed column so
+	// the box width and the flush scrollbar are unchanged).
+	gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", m.textarea.Height()), "\n")
+	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height()), m.textarea.View(), gap, scrollbar(m))
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorSurface2)).
