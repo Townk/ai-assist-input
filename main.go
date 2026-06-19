@@ -37,7 +37,7 @@ const (
 	frameWidth = 2 // rounded border, left + right
 	framePad   = 2 // border padding, left + right
 	scrollCol  = 1 // scroll-indicator column
-	iconCol    = 3 // prompt-icon column ("󰧑" + 2-space gap)
+	iconCol    = 4 // prompt-icon column (1-space lead + "󰧑" + 2-space gap)
 	boxMargin  = 2 // inset of the input box from each pane edge
 )
 
@@ -179,7 +179,7 @@ func iconColumn(h int) string {
 	}
 	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMauve)).Render(promptIcon)
 	rows := make([]string, h)
-	rows[0] = icon + "  " // icon (1 cell) + 2-space gap = iconCol wide
+	rows[0] = " " + icon + "  " // 1-space lead + icon (1 cell) + 2-space gap = iconCol wide
 	for i := 1; i < h; i++ {
 		rows[i] = strings.Repeat(" ", iconCol)
 	}

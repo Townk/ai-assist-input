@@ -39,6 +39,17 @@ func TestRenderLayout(t *testing.T) {
 	}
 }
 
+// TestPopupInputArea pins the chrome budget: ai-assist-popup opens a 55-col
+// float (→ 53-col content area), and the input area must come out 40x3.
+func TestPopupInputArea(t *testing.T) {
+	m := initialModel("", "ai-assist", 3)
+	m.width = 53 // 55-col float minus the pane border
+	m.resize()
+	if w, h := m.textarea.Width(), m.textarea.Height(); w != 40 || h != 3 {
+		t.Fatalf("input area = %dx%d, want 40x3 (chrome assumes a 55-col float)", w, h)
+	}
+}
+
 // TestRenderFitsPane verifies no rendered line exceeds the pane width.
 func TestRenderFitsPane(t *testing.T) {
 	m := initialModel("a long enough value to exercise wrapping across the textarea width", "ai-assist", 4)
