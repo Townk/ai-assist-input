@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -77,5 +78,25 @@ func TestRenderFitsPane(t *testing.T) {
 		if w := lipgloss.Width(l); w > m.width {
 			t.Fatalf("line %d width %d exceeds pane width %d: %q", i, w, m.width, strip(l))
 		}
+	}
+}
+
+// TestPasteMultiLine verifies that a bracketed-paste event carrying a
+// multi-line string inserts the full text (newlines included) without
+// triggering submit.
+func TestPasteMultiLine(t *testing.T) {
+	m := initialModel("", "ai-assist", 5)
+	m.width = 60
+	m.resize()
+
+	pastedText := "first line\nsecond line\nthird line"
+	result, _ := m.Update(tea.PasteMsg{Content: pastedText})
+	updated := result.(model)
+
+	if updated.submitted {
+		t.Fatal("paste must NOT trigger submit")
+	}
+	if got := updated.textarea.Value(); got != pastedText {
+		t.Fatalf("textarea value after paste = %q, want %q", got, pastedText)
 	}
 }

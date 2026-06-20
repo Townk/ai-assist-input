@@ -111,6 +111,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width // width only — height is fixed (--height)
 		m.resize()
 		return m, nil
+	case tea.PasteMsg:
+		// Bracketed paste: insert the full pasted content (including any embedded
+		// newlines) without triggering submit. Bubbletea v2 enables bracketed paste
+		// by default (opt-out via View.DisableBracketedPasteMode); pasted text
+		// arrives here as a PasteMsg rather than as individual key events, so the
+		// plain-Enter submit path is never triggered by pasted newlines.
+		m.textarea.InsertString(msg.Content)
+		return m, nil
 	case tea.KeyPressMsg:
 		key := msg.Key()
 		switch {
