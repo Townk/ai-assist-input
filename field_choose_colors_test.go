@@ -40,13 +40,13 @@ func TestChooseNonHighlightedRowUsesMutedFg(t *testing.T) {
 	}
 }
 
-// Problem 3 (unfocused): the other box renders entirely in the muted colour and
-// shows no placeholder when empty.
-func TestChooseOtherUnfocusedIsMutedNoPlaceholder(t *testing.T) {
+// Problem 3 (unfocused): the other entry shows its label above the box, and the
+// whole widget (label + border) renders in the muted colour with no background.
+func TestChooseOtherUnfocusedIsMuted(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")
 	out := f.view(40, true) // highlight row 0 → other row (idx 2) unfocused + empty
-	if strings.Contains(strip(out), "Other…") {
-		t.Fatalf("unfocused empty other must NOT show the placeholder: %q", strip(out))
+	if !strings.Contains(strip(out), "Other…:") {
+		t.Fatalf("other label must render as a heading above the box: %q", strip(out))
 	}
 	bl := topBorderLine(t, out)
 	if strings.Contains(bl, fgFieldBorder) {
@@ -60,21 +60,41 @@ func TestChooseOtherUnfocusedIsMutedNoPlaceholder(t *testing.T) {
 	}
 }
 
-// Problem 3 (focused): the other box uses the selected background and bright
-// white for everything (border included), and shows the placeholder.
+// Problem 3 (focused): the other entry uses the selected background and bright
+// white for everything (label + border + icon), and the background fills EVERY
+// line of the box — including the icon row and the empty rows (no gaps).
 func TestChooseOtherFocusedSelBgBrightWhite(t *testing.T) {
 	g, _, _ := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")).
 		handle(tea.KeyPressMsg{Code: tea.KeyDown})
 	g, _, _ = g.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto the other row (idx 2)
 	out := g.view(40, true)
+
+	// The label heading renders bright white on the selected background.
+	if !strings.Contains(strip(out), "Other…:") {
+		t.Fatalf("focused other should show its label heading: %q", strip(out))
+	}
 	bl := topBorderLine(t, out)
 	if !strings.Contains(bl, fgWhite) {
 		t.Fatalf("focused other border must be bright white %q: %q", fgWhite, bl)
 	}
-	if !strings.Contains(bl, bgSel) {
-		t.Fatalf("focused other box must use the selected background %q: %q", bgSel, bl)
+
+	// Every line from the label through the box bottom must carry the selected
+	// background — no cell left with the default background (Problem 2/3).
+	lines := strings.Split(out, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "Other…") {
+			start = i
+			break
+		}
 	}
-	if !strings.Contains(strip(out), "Other…") {
-		t.Fatalf("focused empty other should show the placeholder: %q", strip(out))
+	if start < 0 || start+4 >= len(lines) {
+		t.Fatalf("expected a 5-line focused other item: %q", out)
+	}
+	for off := 0; off <= 4; off++ { // label, top, icon row, empty row, bottom
+		if !strings.Contains(lines[start+off], bgSel) {
+			t.Fatalf("focused other line %d must be backed by the selected bg %q: %q",
+				off, bgSel, lines[start+off])
+		}
 	}
 }

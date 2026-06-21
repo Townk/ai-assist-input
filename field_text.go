@@ -151,27 +151,42 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 	}
 	defer func() { f.ta.Placeholder = saved }()
 
-	// Apply the requested text foreground (and background, if any). Leaving the
-	// text background unset lets the box-level Background fill the interior.
+	// withBg adds st.bg as the background when one is requested. Used on every
+	// inner piece so no cell is left with the terminal-default background.
+	withBg := func(s lipgloss.Style) lipgloss.Style {
+		if st.bg != "" {
+			return s.Background(lipgloss.Color(st.bg))
+		}
+		return s
+	}
+
+	// Apply the requested text foreground (and background, if any). Base is
+	// inherited by Text/Placeholder/CursorLine/EndOfBuffer, so setting its
+	// background fills the whole textarea (including empty rows).
 	s := textarea.DefaultDarkStyles()
-	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(st.text))
-	s.Focused.Base = lipgloss.NewStyle()
-	s.Blurred.Base = lipgloss.NewStyle()
+	base := withBg(lipgloss.NewStyle())
+	textStyle := withBg(lipgloss.NewStyle().Foreground(lipgloss.Color(st.text)))
+	s.Focused.Base = base
+	s.Blurred.Base = base
 	s.Focused.Text = textStyle
 	s.Blurred.Text = textStyle
-	s.Focused.CursorLine = lipgloss.NewStyle()
-	s.Blurred.CursorLine = lipgloss.NewStyle()
+	s.Focused.CursorLine = base
+	s.Blurred.CursorLine = base
+	s.Focused.Placeholder = withBg(s.Focused.Placeholder)
+	s.Blurred.Placeholder = withBg(s.Blurred.Placeholder)
 	if st.bg != "" {
-		ph := s.Focused.Placeholder.Background(lipgloss.Color(st.bg))
-		s.Focused.Placeholder = ph
-		s.Blurred.Placeholder = ph
+		// Make the (virtual) cursor visible against the selected background.
+		s.Cursor.Color = lipgloss.Color(st.text)
 	}
 	f.ta.SetStyles(s)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), st.icon), f.ta.View())
+	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), st.icon, st.bg), f.ta.View())
 	if !f.singleLine {
 		gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", f.ta.Height()), "\n")
-		body = lipgloss.JoinHorizontal(lipgloss.Top, body, gap, scrollbar(f))
+		if st.bg != "" {
+			gap = withBg(lipgloss.NewStyle()).Render(gap)
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, gap, scrollbarColored(f, st.bg))
 	}
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -210,7 +225,11 @@ func visualLineCount(f *textField) int {
 	return total
 }
 
-func scrollbar(f *textField) string {
+func scrollbar(f *textField) string { return scrollbarColored(f, "") }
+
+// scrollbarColored renders the scroll column; bg (when non-empty) backs every
+// cell with the selected background so the focused "other" box has no gaps.
+func scrollbarColored(f *textField, bg string) string {
 	h := f.ta.Height()
 	if h < 1 {
 		h = 1
@@ -220,8 +239,20 @@ func scrollbar(f *textField) string {
 	if total < off+h {
 		total = off + h
 	}
+	blank := lipgloss.NewStyle()
+	track := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.Rule))
+	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.ScrollThumb))
+	if bg != "" {
+		blank = blank.Background(lipgloss.Color(bg))
+		track = track.Background(lipgloss.Color(bg))
+		thumbStyle = thumbStyle.Background(lipgloss.Color(bg))
+	}
 	if total <= h {
-		return strings.TrimRight(strings.Repeat(" \n", h), "\n")
+		rows := make([]string, h)
+		for i := range rows {
+			rows[i] = blank.Render(" ")
+		}
+		return strings.Join(rows, "\n")
 	}
 	thumb := h * h / total
 	if thumb < 1 {
@@ -232,8 +263,6 @@ func scrollbar(f *textField) string {
 	if maxOff > 0 {
 		pos = (h - thumb) * off / maxOff
 	}
-	track := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.Rule))
-	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.ScrollThumb))
 	rows := make([]string, h)
 	for i := range rows {
 		if i >= pos && i < pos+thumb {
@@ -246,16 +275,22 @@ func scrollbar(f *textField) string {
 }
 
 // iconColumnColored renders the prompt-icon column with an explicit foreground
-// color (so the choose "other" row can recolor the icon per focus state).
-func iconColumnColored(h int, fg string) string {
+// color and optional background (so the choose "other" row can recolor the icon
+// per focus state and keep the selected background unbroken).
+func iconColumnColored(h int, fg, bg string) string {
 	if h < 1 {
 		h = 1
 	}
-	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Render(promptIcon)
+	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fg))
+	blankStyle := lipgloss.NewStyle()
+	if bg != "" {
+		iconStyle = iconStyle.Background(lipgloss.Color(bg))
+		blankStyle = blankStyle.Background(lipgloss.Color(bg))
+	}
 	rows := make([]string, h)
-	rows[0] = icon + "  "
+	rows[0] = iconStyle.Render(promptIcon) + blankStyle.Render("  ")
 	for i := 1; i < h; i++ {
-		rows[i] = strings.Repeat(" ", iconCol)
+		rows[i] = blankStyle.Render(strings.Repeat(" ", iconCol))
 	}
 	return strings.Join(rows, "\n")
 }

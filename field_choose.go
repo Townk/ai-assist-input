@@ -17,6 +17,11 @@ const (
 	// gutterLen is the number of terminal columns used by the fixed gutter
 	// that precedes every option label: " <indicator> " = 3 cells.
 	gutterLen = 3
+
+	// otherBoxMinW is the minimum width for the embedded "other" textField box.
+	// Below it the textField renders wider than its column and the highlight
+	// padding would re-wrap; at real dialog widths (innerW >= 12) it never binds.
+	otherBoxMinW = boxBorder + boxPadL + iconCol + scrollGap + scrollCol + 1
 )
 
 const maxVisibleRows = 8
@@ -46,7 +51,9 @@ func newChooseField(theme Theme, variant string, options []string, multi bool, o
 	toggled := make([]bool, len(options))
 	var otherField *textField
 	if other != "" {
-		otherField = newTextField(theme, "", other, 2, false)
+		// The "other" label is rendered as a heading above the box, so the box
+		// itself carries no placeholder.
+		otherField = newTextField(theme, "", "", 2, false)
 	}
 	return &chooseField{
 		theme:      theme,
@@ -317,7 +324,16 @@ func (f *chooseField) view(innerW int, focused bool) string {
 		isHL := focused && i == f.highlight
 
 		if f.isOtherRow(i) {
-			// The "other" row always renders as a 4-line box (static height).
+			// The "other" entry renders as a heading line ("<indicator> Label:")
+			// followed by a 4-line input box indented under the label. The cursor
+			// is only shown when this row is focused, so blur the embedded textarea
+			// otherwise.
+			if isHL {
+				f.otherField.ta.Focus()
+			} else {
+				f.otherField.ta.Blur()
+			}
+
 			// Indicator: single → checked radio when highlighted; multi → checked
 			// checkbox when the other field has text.
 			var otherIndicator string
@@ -335,59 +351,44 @@ func (f *chooseField) view(innerW int, focused bool) string {
 				}
 			}
 
-			// Always render the box. The gutter (" <indicator> ") is prefixed on
-			// the FIRST line; continuation lines get gutterLen spaces for alignment.
-			gutterText := " " + otherIndicator + " "
-			gutterBlank := strings.Repeat(" ", gutterLen)
 			boxW := innerW - gutterLen
-			// Floor: the embedded textField is multiline (singleLine=false) so its chrome
-			// is boxBorder + boxPadL + iconCol + scrollGap + scrollCol = 8 columns, plus
-			// at least 1 column for the textarea itself.  Below this floor the textField
-			// renders wider than boxW, which makes hlStyle.Width(innerW).Render() re-wrap
-			// the guttered lines and produce more rows than lines() reports.
-			// At real dialog widths (innerW >= 12) this floor is never hit.
-			const otherBoxMinW = boxBorder + boxPadL + iconCol + scrollGap + scrollCol + 1
 			if boxW < otherBoxMinW {
 				boxW = otherBoxMinW
 			}
-			// hlW: the width to pass to hlStyle.Width() so it does not wrap the guttered
-			// line.  Normally gutterLen + boxW == innerW; when boxW was clamped up we use
-			// the actual rendered width so highlight padding never causes re-wrapping.
 			hlW := gutterLen + boxW
+			indent := strings.Repeat(" ", gutterLen)
 
 			// Focus-dependent styling:
-			//  - focused   → selected background on the box, bright-white (selFg)
-			//                border/icon/text, placeholder shown; gutter highlighted.
-			//  - unfocused → entire widget (border, icon, text) in the muted
-			//                (unselected-tab) colour, no placeholder when empty.
+			//  - focused   → selected background, bright-white (selFg) label,
+			//                border, icon, and text; whole item highlighted.
+			//  - unfocused → label/border/icon/text in the muted (unselected-tab)
+			//                colour, no background.
 			var st taStyle
-			var gutterStyle lipgloss.Style
 			if isHL {
-				st = taStyle{icon: selFg, border: selFg, text: selFg, bg: selBg, placeholder: true}
-				gutterStyle = hlStyle
+				st = taStyle{icon: selFg, border: selFg, text: selFg, bg: selBg, placeholder: false}
 			} else {
 				st = taStyle{icon: f.theme.Muted, border: f.theme.Muted, text: f.theme.Muted, bg: "", placeholder: false}
-				gutterStyle = mutedStyle
 			}
+
+			// Heading line: " <indicator> <label>:".
+			labelLine := " " + otherIndicator + " " + f.otherLabel + ":"
+			if isHL {
+				rows = append(rows, hlStyle.Width(hlW).Render(labelLine))
+			} else {
+				rows = append(rows, mutedStyle.Render(labelLine))
+			}
+
+			// Input box, indented to align under the label text.
 			boxView := f.otherField.viewWith(boxW, st)
-			boxLines := strings.Split(boxView, "\n")
-			var guttered []string
-			for li, bl := range boxLines {
-				var line string
-				if li == 0 {
-					line = gutterStyle.Render(gutterText) + bl
-				} else {
-					line = gutterStyle.Render(gutterBlank) + bl
-				}
+			for _, bl := range strings.Split(boxView, "\n") {
 				if isHL {
-					// Full-item highlight: pad all 4 lines to hlW (>= innerW) so the
-					// selected background spans the whole item.
-					guttered = append(guttered, hlStyle.Width(hlW).Render(line))
+					// Full-item highlight: the indent carries the background too,
+					// and the line is padded to hlW so it spans the whole item.
+					rows = append(rows, hlStyle.Width(hlW).Render(hlStyle.Render(indent)+bl))
 				} else {
-					guttered = append(guttered, line)
+					rows = append(rows, indent+bl)
 				}
 			}
-			rows = append(rows, guttered...)
 			continue
 		}
 
@@ -470,14 +471,13 @@ func (f *chooseField) filled() bool {
 // The "other" row always occupies 4 lines (2-row textarea + top/bottom border).
 func (f *chooseField) optionLineCount(i, innerW int) int {
 	if f.isOtherRow(i) {
-		// Static 4-line box: always use otherField.lines() (= taHeight + boxBorder = 4).
-		// Apply the same floor as view() so lines() == view() at narrow widths.
+		// 1 heading line + the static 4-line box (otherField.lines() = taHeight +
+		// boxBorder = 4). Apply the same floor as view() so lines() == view().
 		boxW := innerW - gutterLen
-		const otherBoxMinW = boxBorder + boxPadL + iconCol + scrollGap + scrollCol
 		if boxW < otherBoxMinW {
 			boxW = otherBoxMinW
 		}
-		return f.otherField.lines(boxW)
+		return 1 + f.otherField.lines(boxW)
 	}
 	textColW := innerW - gutterLen
 	if textColW < 1 {
