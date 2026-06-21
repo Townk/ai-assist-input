@@ -16,10 +16,10 @@ func main() {
 	runewidth.DefaultCondition.EastAsianWidth = false
 
 	fs := flag.NewFlagSet("ai-assist-input", flag.ExitOnError)
-	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide string
+	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other string
 	var height, padding, inset int
-	var danger, warning bool
-	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm")
+	var danger, warning, multi bool
+	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose")
 	fs.StringVar(&title, "title", "", "modal title")
 	fs.StringVar(&prompt, "prompt", "", "description shown above the input")
 	fs.StringVar(&value, "value", "", "initial value (text|line)")
@@ -33,6 +33,8 @@ func main() {
 	fs.StringVar(&affirmative, "affirmative", "Yes", "confirm affirmative label")
 	fs.StringVar(&negative, "negative", "No", "confirm negative label")
 	fs.StringVar(&defaultSide, "default", "affirmative", "confirm default focus: affirmative|negative")
+	fs.BoolVar(&multi, "multi", false, "choose: allow multiple selections")
+	fs.StringVar(&other, "other", "", "choose: label for free-text other entry (empty disables)")
 	theme := registerThemeFlags(fs)
 	fs.Parse(os.Args[1:])
 
@@ -56,6 +58,8 @@ func main() {
 		runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true)
 	case "text":
 		runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false)
+	case "choose":
+		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
 	default:
 		fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
 		os.Exit(2)
