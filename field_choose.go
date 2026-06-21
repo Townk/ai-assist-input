@@ -20,12 +20,12 @@ type chooseField struct {
 	multi      bool
 	otherLabel string // "" → no other row
 
-	highlight int       // currently highlighted row index (0-based, over all rows)
-	selected  int       // single mode: selected option index (-1 = none)
-	toggled   []bool    // multi mode: toggled[i] for options[i]
-	otherText string    // text typed when "other" was chosen
-	otherActive bool    // true when the embedded textField is focused
-	otherField  *textField
+	highlight int    // currently highlighted row index (0-based, over all rows)
+	selected  int    // single mode: selected option index (-1 = none)
+	toggled   []bool // multi mode: toggled[i] for options[i]
+	// otherField is lazily created when the highlight first lands on the other row.
+	// It is implicitly active whenever isOtherRow(highlight) is true.
+	otherField *textField
 }
 
 // newChooseField constructs a chooseField. other=="" → no free-text entry.
@@ -59,25 +59,6 @@ func (f *chooseField) isOtherRow(idx int) bool {
 
 // handle processes one message while the field is focused.
 func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
-	// Delegate to the embedded textField when other-mode is active.
-	if f.otherActive && f.otherField != nil {
-		f2, act, cmd := f.otherField.handle(msg)
-		c := *f
-		c.otherField = f2.(*textField)
-		switch act {
-		case fieldDone:
-			c.otherText = c.otherField.value()
-			c.otherActive = false
-			return &c, fieldDone, nil
-		case fieldCancel:
-			c.otherActive = false
-			c.otherField = nil
-			c.otherText = ""
-			return &c, fieldNone, nil
-		}
-		return &c, fieldNone, cmd
-	}
-
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return f, fieldNone, nil
@@ -86,6 +67,54 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 	c := *f
 	total := c.totalRows()
 
+	// When the highlight is on the other row, the embedded textField is implicitly
+	// active. Route keys to it EXCEPT for navigation/submit/cancel keys that belong
+	// to the choose layer.
+	if c.isOtherRow(c.highlight) {
+		// Lazily initialise the other field the first time we land on the row.
+		if c.otherField == nil {
+			c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
+		}
+
+		switch {
+		case kp.Code == tea.KeyEscape:
+			return &c, fieldCancel, nil
+
+		case kp.String() == "ctrl+c":
+			return &c, fieldCancel, nil
+
+		// Arrow keys leave the other row (navigate the list); they do NOT type.
+		case kp.Code == tea.KeyUp:
+			if c.highlight > 0 {
+				c.highlight--
+			}
+			return &c, fieldNone, nil
+
+		case kp.Code == tea.KeyDown:
+			if c.highlight < total-1 {
+				c.highlight++
+			}
+			return &c, fieldNone, nil
+
+		// Shift+Enter → newline into the embedded field.
+		case kp.Code == tea.KeyEnter && kp.Mod.Contains(tea.ModShift):
+			f2, _, cmd := c.otherField.handle(msg)
+			c.otherField = f2.(*textField)
+			return &c, fieldNone, cmd
+
+		// Plain Enter → submit the whole choose with the field's current value.
+		case kp.Code == tea.KeyEnter:
+			return &c, fieldDone, nil
+
+		default:
+			// Forward everything else (printable chars, Backspace, etc.) to the field.
+			f2, _, cmd := c.otherField.handle(msg)
+			c.otherField = f2.(*textField)
+			return &c, fieldNone, cmd
+		}
+	}
+
+	// Highlight is NOT the other row — original navigation/selection behavior.
 	switch {
 	case kp.Code == tea.KeyEscape:
 		return f, fieldCancel, nil
@@ -96,6 +125,10 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 	case kp.Code == 'j' || kp.Code == tea.KeyDown:
 		if c.highlight < total-1 {
 			c.highlight++
+			// Lazily initialise the other field when we first land on the other row.
+			if c.isOtherRow(c.highlight) && c.otherField == nil {
+				c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
+			}
 		}
 		return &c, fieldNone, nil
 
@@ -112,9 +145,10 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 		}
 		c.highlight = n
 		if c.isOtherRow(n) {
-			// Activate the other free-text entry.
-			c.otherField = newTextField(c.theme, "", "", 1, true)
-			c.otherActive = true
+			// Focus the other row (focus-to-type; lazily init the field).
+			if c.otherField == nil {
+				c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
+			}
 			return &c, fieldNone, nil
 		}
 		if c.multi {
@@ -132,12 +166,6 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 		return &c, fieldNone, nil
 
 	case kp.Code == tea.KeyEnter:
-		if c.isOtherRow(c.highlight) {
-			// Activate the other free-text entry.
-			c.otherField = newTextField(c.theme, "", "", 1, true)
-			c.otherActive = true
-			return &c, fieldNone, nil
-		}
 		if c.multi {
 			return &c, fieldDone, nil
 		}
@@ -321,10 +349,29 @@ func (f *chooseField) view(innerW int, focused bool) string {
 		isHL := focused && i == f.highlight
 
 		if f.isOtherRow(i) {
-			if f.otherActive && f.otherField != nil {
-				// Render inline text field.
-				label := mutedStyle.Render(" "+num+" ") + f.otherField.view(innerW-4, true)
-				rows = append(rows, label)
+			if isHL && f.otherField != nil {
+				// Render inline text field with aligned gutter.
+				// The number gutter (" N ") is prefixed on the box's FIRST line;
+				// continuation lines get equal-width spaces so the box's left
+				// border stays vertically consistent.
+				gutterText := " " + num + " "
+				gutterLen := 1 + len(num) + 1
+				gutterBlank := strings.Repeat(" ", gutterLen)
+				boxW := innerW - gutterLen
+				if boxW < 1 {
+					boxW = 1
+				}
+				boxView := f.otherField.view(boxW, true)
+				boxLines := strings.Split(boxView, "\n")
+				var guttered []string
+				for li, bl := range boxLines {
+					if li == 0 {
+						guttered = append(guttered, mutedStyle.Render(gutterText)+bl)
+					} else {
+						guttered = append(guttered, gutterBlank+bl)
+					}
+				}
+				rows = append(rows, guttered...)
 			} else {
 				label := fmt.Sprintf(" %s %s ", num, f.otherLabel)
 				if isHL {
@@ -352,13 +399,21 @@ func (f *chooseField) view(innerW int, focused bool) string {
 // Single: selected option or typed other text.
 // Multi: \n-joined selected options (+ other text if set).
 func (f *chooseField) value() string {
-	if f.otherActive && f.otherField != nil {
-		return f.otherField.value()
-	}
-	if f.otherText != "" {
-		if !f.multi {
-			return f.otherText
+	// When the highlight is on the other row and there's an active embedded field,
+	// return its current buffer (this covers both the in-progress and submitted cases).
+	if f.isOtherRow(f.highlight) && f.otherField != nil {
+		otherVal := f.otherField.value()
+		if f.multi && otherVal != "" {
+			var parts []string
+			for i, opt := range f.options {
+				if f.toggled[i] {
+					parts = append(parts, opt)
+				}
+			}
+			parts = append(parts, otherVal)
+			return strings.Join(parts, "\n")
 		}
+		return otherVal
 	}
 	if f.multi {
 		var parts []string
@@ -366,9 +421,6 @@ func (f *chooseField) value() string {
 			if f.toggled[i] {
 				parts = append(parts, opt)
 			}
-		}
-		if f.otherText != "" {
-			parts = append(parts, f.otherText)
 		}
 		return strings.Join(parts, "\n")
 	}
@@ -380,11 +432,11 @@ func (f *chooseField) value() string {
 }
 
 // filled returns true if a selection has been made (single) or ≥1 selected (multi).
-// When the free-text "other" entry is active, we also treat a non-empty in-progress
-// buffer as filled — otherwise Tab-away from the other field wedges a required form
-// (the form interceptsTab before the field can commit, so otherText never gets set).
+// When the other row is highlighted and the in-progress buffer is non-empty, we treat
+// that as filled — otherwise Tab-away from the other field wedges a required form
+// (the form intercepts Tab before the field can commit).
 func (f *chooseField) filled() bool {
-	if f.otherActive && f.otherField != nil && f.otherField.value() != "" {
+	if f.isOtherRow(f.highlight) && f.otherField != nil && f.otherField.value() != "" {
 		return true
 	}
 	if f.multi {
@@ -393,9 +445,9 @@ func (f *chooseField) filled() bool {
 				return true
 			}
 		}
-		return f.otherText != ""
+		return false
 	}
-	return f.selected >= 0 || f.otherText != ""
+	return f.selected >= 0
 }
 
 // optionLineCount returns the number of visual lines a single option row at
@@ -423,16 +475,22 @@ func (f *chooseField) optionLineCount(i, innerW int) int {
 
 // lines returns the rendered height of this field.
 // It mirrors the row count that view() emits: window rows + indicator rows.
-// When the "other" free-text entry is active, its embedded textField renders as
-// multiple physical lines (border + textarea height), so we substitute its line
-// count for the single slot the other row would otherwise occupy.
-// When option labels wrap, each extra visual line is counted.
+// When the other row is highlighted and the embedded textField is visible, its
+// multi-line box (border + textarea height) is substituted for the single-row
+// placeholder.  When option labels wrap, each extra visual line is counted.
 func (f *chooseField) lines(innerW int) int {
 	viewStart, viewEnd, showUp, showDown := f.windowBounds()
 	count := 0
 	for i := viewStart; i < viewEnd; i++ {
-		if f.isOtherRow(i) && f.otherActive && f.otherField != nil {
-			count += f.otherField.lines(innerW - 4)
+		if f.isOtherRow(i) && f.isOtherRow(f.highlight) && f.otherField != nil {
+			// The gutter takes `1 + len(num) + 1` chars; pass remaining width to the box.
+			num := fmt.Sprintf("%d", i+1)
+			gutterLen := 1 + len(num) + 1
+			boxW := innerW - gutterLen
+			if boxW < 1 {
+				boxW = 1
+			}
+			count += f.otherField.lines(boxW)
 		} else {
 			count += f.optionLineCount(i, innerW)
 		}

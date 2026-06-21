@@ -55,15 +55,43 @@ func TestChooseRendersListNoFuzzy(t *testing.T) {
 
 func TestChooseOtherFreeText(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
-	// navigate to the trailing other entry (index 2) and select → enters text mode
-	f, _, _ = f.handle(key('3'))
-	// type a custom value
+	// navigate to the trailing other entry using arrow-down (focus-to-type: no Enter to activate)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // now on the other row
+	// type a custom value directly (no activate step needed)
 	for _, r := range "custom" {
 		f, _, _ = f.handle(key(r))
 	}
 	f2, act, _ := f.handle(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if act != fieldDone || f2.value() != "custom" {
 		t.Fatalf("other free-text must yield the typed value: act=%d val=%q", act, f2.value())
+	}
+}
+
+func TestChooseOtherFocusToType(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
+	// move highlight onto the "other" row (index 2 → key '3' navigates+… but we
+	// want focus-to-type, so use arrow-down twice to land on it WITHOUT selecting)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // now on the other row
+	// typing goes straight into the field (no Enter to activate)
+	for _, r := range "custom" {
+		f, _, _ = f.handle(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	// Enter submits the whole choose with the typed value
+	f2, act, _ := f.handle(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if act != fieldDone || f2.value() != "custom" {
+		t.Fatalf("focus-to-type other must submit typed value: act=%d val=%q", act, f2.value())
+	}
+}
+
+func TestChooseOtherShiftEnterNewline(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a"}, false, "Other…"))
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto other row
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if !strings.Contains(f.value(), "\n") {
+		t.Fatalf("Shift+Enter in other must insert a newline: %q", f.value())
 	}
 }
 
@@ -111,11 +139,13 @@ func TestChooseLinesMatchViewLong(t *testing.T) {
 }
 
 func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
-	// Activate other, type text, do NOT press Enter → value() is non-empty and filled() is true.
+	// Focus the other row, type text, do NOT press Enter → value() is non-empty and filled() is true.
 	// This covers the Tab-away-wedges-form bug: the form intercepts Tab before the field
 	// commits, so otherText never gets set; filled() must look at the in-progress buffer.
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
-	f, _, _ = f.handle(key('3')) // navigate to "other" and activate text mode
+	// navigate to "other" row via arrows (focus-to-type flow)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
 	for _, r := range "typed" {
 		f, _, _ = f.handle(key(r))
 	}
@@ -129,10 +159,12 @@ func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
 }
 
 func TestChooseLinesMatchViewOtherActive(t *testing.T) {
-	// When the "other" free-text entry is active, the embedded textField renders as
-	// multiple physical lines; lines() must match the actual view() row count.
+	// When the "other" row is highlighted (focus-to-type), the embedded textField
+	// renders as multiple physical lines; lines() must match the actual view() row count.
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
-	f, _, _ = f.handle(key('3')) // activate other text mode
+	// navigate to "other" row via arrows (focus-to-type flow)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
 	linesMatchView(t, f, 40, "other-active (embedded textField rows must match lines())")
 }
 
