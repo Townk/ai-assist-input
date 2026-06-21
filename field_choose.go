@@ -177,6 +177,114 @@ func (f *chooseField) windowBounds() (viewStart, viewEnd int, showUp, showDown b
 	return
 }
 
+// wrapLabel wraps labelText into lines of at most colW visible characters.
+// It returns one or more strings; if the text fits in colW, it returns a
+// single-element slice.  Wrapping is done at word boundaries (spaces); long
+// words that exceed colW are broken at the column boundary.
+func wrapLabel(labelText string, colW int) []string {
+	if colW <= 0 {
+		return []string{labelText}
+	}
+	wrapped := lipgloss.Wrap(labelText, colW, " ")
+	return strings.Split(wrapped, "\n")
+}
+
+// renderOptionRow builds the visual lines for a single list option (not the
+// "other" row).  It returns the lines that should be appended to rows.
+//
+// Layout per first visual line:
+//
+//	" " + num + " " + [marker] + text
+//
+// where the trailing " " is included in the padded width for highlighted rows.
+// Continuation lines are indented to align under the label text (past the
+// " num " prefix and, for multi mode, past the "● " / "○ " marker).
+func (f *chooseField) renderOptionRow(
+	i, innerW int,
+	isHL bool,
+	hlStyle, normStyle, mutedStyle, markerSelStyle lipgloss.Style,
+) []string {
+	num := fmt.Sprintf("%d", i+1)
+	// Prefix: " " + num + " "  (e.g., " 1 " = 3 chars for single-digit)
+	prefixLen := 1 + len(num) + 1
+	// Trailing space is accounted for in innerW padding for highlights, or
+	// appended to non-highlighted lines.
+	trailingLen := 1
+
+	opt := f.options[i]
+
+	// Marker for multi-select (2 visible chars: "● " or "○ ").
+	const markerLen = 2
+	var markerPlain string // plain-text version for width calculation
+	if f.multi {
+		if f.toggled[i] {
+			markerPlain = "● "
+		} else {
+			markerPlain = "○ "
+		}
+	}
+
+	// Width available for the label text (including marker).
+	labelColW := innerW - prefixLen - trailingLen
+	if labelColW < 1 {
+		labelColW = 1
+	}
+	// Width available for the option text itself (after marker).
+	textColW := labelColW
+	if f.multi {
+		textColW = labelColW - markerLen
+		if textColW < 1 {
+			textColW = 1
+		}
+	}
+
+	// Wrap the option text into textColW-wide chunks.
+	textLines := wrapLabel(opt, textColW)
+
+	// Indentation for continuation lines (aligns under label text after marker).
+	contIndent := strings.Repeat(" ", prefixLen+len(markerPlain))
+
+	prefix := " " + num + " "
+
+	var resultLines []string
+	for li, tl := range textLines {
+		var lineText string
+		if li == 0 {
+			// First visual line: prefix + marker + text.
+			lineText = prefix + markerPlain + tl
+		} else {
+			// Continuation: indented to label-text column.
+			lineText = contIndent + tl
+		}
+
+		if isHL {
+			// Pad each line to innerW with the highlight background.
+			styled := hlStyle.Width(innerW).Render(lineText)
+			resultLines = append(resultLines, styled)
+		} else {
+			// Non-highlighted: no padding, just colour.
+			if li == 0 {
+				numStyled := mutedStyle.Render(prefix)
+				if f.multi {
+					var markerStyled string
+					if f.toggled[i] {
+						markerStyled = markerSelStyle.Render("●") + " "
+					} else {
+						markerStyled = mutedStyle.Render("○") + " "
+					}
+					resultLines = append(resultLines, numStyled+markerStyled+normStyle.Render(tl))
+				} else {
+					resultLines = append(resultLines, numStyled+normStyle.Render(tl))
+				}
+			} else {
+				resultLines = append(resultLines, normStyle.Render(lineText))
+			}
+			continue
+		}
+	}
+	return resultLines
+}
+
 // view renders the list rows with optional windowed scroll.
 // innerW is the width available inside the outer frame.
 func (f *chooseField) view(innerW int, focused bool) string {
@@ -215,12 +323,12 @@ func (f *chooseField) view(innerW int, focused bool) string {
 		if f.isOtherRow(i) {
 			if f.otherActive && f.otherField != nil {
 				// Render inline text field.
-				label := mutedStyle.Render(num+" ") + f.otherField.view(innerW-4, true)
+				label := mutedStyle.Render(" "+num+" ") + f.otherField.view(innerW-4, true)
 				rows = append(rows, label)
 			} else {
-				label := fmt.Sprintf("%s %s", num, f.otherLabel)
+				label := fmt.Sprintf(" %s %s ", num, f.otherLabel)
 				if isHL {
-					rows = append(rows, hlStyle.Render(label))
+					rows = append(rows, hlStyle.Width(innerW).Render(label))
 				} else {
 					rows = append(rows, mutedStyle.Render(label))
 				}
@@ -228,36 +336,8 @@ func (f *chooseField) view(innerW int, focused bool) string {
 			continue
 		}
 
-		opt := f.options[i]
-		var marker string
-		if f.multi {
-			if f.toggled[i] {
-				marker = markerSelStyle.Render("●") + " "
-			} else {
-				marker = mutedStyle.Render("○") + " "
-			}
-		}
-
-		if isHL {
-			numPart := hlStyle.Render(num)
-			sep := hlStyle.Render(" ")
-			var row string
-			if f.multi {
-				row = numPart + sep + marker + hlStyle.Render(opt)
-			} else {
-				row = numPart + sep + hlStyle.Render(opt)
-			}
-			rows = append(rows, row)
-		} else {
-			numPart := mutedStyle.Render(num)
-			var row string
-			if f.multi {
-				row = numPart + " " + marker + normStyle.Render(opt)
-			} else {
-				row = numPart + " " + normStyle.Render(opt)
-			}
-			rows = append(rows, row)
-		}
+		optRows := f.renderOptionRow(i, innerW, isHL, hlStyle, normStyle, mutedStyle, markerSelStyle)
+		rows = append(rows, optRows...)
 	}
 
 	// Scroll indicator at bottom if clipped.
@@ -318,27 +398,50 @@ func (f *chooseField) filled() bool {
 	return f.selected >= 0 || f.otherText != ""
 }
 
+// optionLineCount returns the number of visual lines a single option row at
+// index i occupies given innerW, accounting for label wrapping.
+// The "other" row always occupies 1 line (or otherField.lines() when active,
+// handled separately in lines()).
+func (f *chooseField) optionLineCount(i, innerW int) int {
+	if f.isOtherRow(i) {
+		return 1
+	}
+	num := fmt.Sprintf("%d", i+1)
+	prefixLen := 1 + len(num) + 1
+	trailingLen := 1
+	const markerLen = 2
+	textColW := innerW - prefixLen - trailingLen
+	if f.multi {
+		textColW -= markerLen
+	}
+	if textColW < 1 {
+		textColW = 1
+	}
+	lines := wrapLabel(f.options[i], textColW)
+	return len(lines)
+}
+
 // lines returns the rendered height of this field.
 // It mirrors the row count that view() emits: window rows + indicator rows.
 // When the "other" free-text entry is active, its embedded textField renders as
 // multiple physical lines (border + textarea height), so we substitute its line
 // count for the single slot the other row would otherwise occupy.
+// When option labels wrap, each extra visual line is counted.
 func (f *chooseField) lines(innerW int) int {
 	viewStart, viewEnd, showUp, showDown := f.windowBounds()
-	count := viewEnd - viewStart
+	count := 0
+	for i := viewStart; i < viewEnd; i++ {
+		if f.isOtherRow(i) && f.otherActive && f.otherField != nil {
+			count += f.otherField.lines(innerW - 4)
+		} else {
+			count += f.optionLineCount(i, innerW)
+		}
+	}
 	if showUp {
 		count++
 	}
 	if showDown {
 		count++
-	}
-	// If the "other" row is in the visible window and the embedded textField is
-	// active, that row renders as otherField.lines() physical lines instead of 1.
-	if f.otherActive && f.otherField != nil {
-		otherIdx := len(f.options) // index of the "other" row in the full list
-		if otherIdx >= viewStart && otherIdx < viewEnd {
-			count += f.otherField.lines(innerW-4) - 1
-		}
 	}
 	return count
 }

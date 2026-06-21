@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func key(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
@@ -133,4 +134,36 @@ func TestChooseLinesMatchViewOtherActive(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
 	f, _, _ = f.handle(key('3')) // activate other text mode
 	linesMatchView(t, f, 40, "other-active (embedded textField rows must match lines())")
+}
+
+func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
+	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
+	// highlight is row 0 by default
+	out := strip(f.view(30, true))
+	first := strings.Split(out, "\n")[0]
+	// 1 leading space before the number, 1 trailing space after the label, and
+	// the highlighted row is padded to the inner width (full-width bar).
+	if !strings.HasPrefix(first, " 1 alpha") {
+		t.Fatalf("row must be ' <n> <label>' with a leading space: %q", first)
+	}
+	if lipgloss.Width(first) < 28 {
+		t.Fatalf("highlighted row must span ~inner width, got width %d: %q", lipgloss.Width(first), first)
+	}
+}
+
+func TestChooseLongOptionWraps(t *testing.T) {
+	long := "this is a very long option label that must wrap onto a second visual line"
+	f := newChooseField(defaultTheme(), "default", []string{long, "b"}, false, "")
+	out := strip(f.view(24, true))
+	lines := strings.Split(out, "\n")
+	// the long option occupies >1 visual line, and the continuation is indented
+	// under the label text (past the "  N " number column), not under the number.
+	if len(lines) < 3 {
+		t.Fatalf("long option must wrap to multiple lines: %q", out)
+	}
+	// continuation line starts with the label-column indent (spaces), not a digit
+	cont := lines[1]
+	if strings.TrimLeft(cont, " ") == cont {
+		t.Fatalf("wrapped continuation must be indented under the label: %q", cont)
+	}
 }
