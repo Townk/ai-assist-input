@@ -21,7 +21,6 @@ type confirmModel struct {
 	focus          int // 0 = affirmative (left), 1 = negative (right)
 	width          int
 	padding, inset int
-	done           bool
 	cancelled      bool
 	result         string // "yes" | "no"
 }
@@ -66,13 +65,12 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch resolveConfirmKey(confirmKeyString(msg), m.affKey, m.negKey) {
 		case actAffirm:
-			m.done, m.result = true, "yes"
+			m.result = "yes"
 			return m, tea.Quit
 		case actNegate:
-			m.done, m.result = true, "no"
+			m.result = "no"
 			return m, tea.Quit
 		case actSubmit:
-			m.done = true
 			if m.focus == 0 {
 				m.result = "yes"
 			} else {
@@ -139,7 +137,7 @@ func runConfirm(theme Theme, variant, title, prompt, affirmative, negative strin
 		os.Exit(1)
 	}
 	res := fm.(confirmModel)
-	if res.cancelled {
+	if res.cancelled || res.result == "" {
 		os.Exit(130)
 	}
 	fmt.Print(res.result)
