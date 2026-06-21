@@ -16,10 +16,11 @@ func main() {
 	runewidth.DefaultCondition.EastAsianWidth = false
 
 	fs := flag.NewFlagSet("ai-assist-input", flag.ExitOnError)
-	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other string
+	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec string
 	var height, padding, inset int
 	var danger, warning, multi bool
-	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose")
+	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose|form")
+	fs.StringVar(&spec, "spec", "", "form: path to spec file (US/RS encoded); omit to read stdin")
 	fs.StringVar(&title, "title", "", "modal title")
 	fs.StringVar(&prompt, "prompt", "", "description shown above the input")
 	fs.StringVar(&value, "value", "", "initial value (text|line)")
@@ -60,6 +61,8 @@ func main() {
 		runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false)
 	case "choose":
 		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
+	case "form":
+		runForm(*theme, title, spec, padding, inset)
 	default:
 		fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
 		os.Exit(2)
