@@ -13,41 +13,64 @@ var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func strip(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
-// TestRenderLayout pins the modal frame: title (no leading blank) → rule → boxed
-// input with the prompt icon → hint, in that order.
+// TestRenderLayout pins the modal: a rounded outer border, then the title, rule,
+// boxed input with the prompt icon, and the new "·"-separated hint.
 func TestRenderLayout(t *testing.T) {
 	m := initialModel("hello world", "ai-assist", 5)
 	m.width = 60
 	m.resize()
-	lines := strings.Split(strip(m.render()), "\n")
-
-	if !strings.HasPrefix(lines[0], "  ▓▓▓ ai-assist") {
-		t.Fatalf("first line must be the title (no leading blank), got %q", lines[0])
+	plain := strip(m.render())
+	lines := strings.Split(plain, "\n")
+	if !strings.HasPrefix(lines[0], "╭") {
+		t.Fatalf("first line must be the outer border, got %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "━") {
-		t.Fatalf("second line must be the rule, got %q", lines[1])
+	if !strings.Contains(plain, "▓▓▓ ai-assist") {
+		t.Fatal("title missing")
 	}
-	out := strings.Join(lines, "\n")
-	if !strings.Contains(out, promptIcon) {
-		t.Fatal("prompt icon missing from the modal")
+	if !strings.Contains(plain, "━") {
+		t.Fatal("rule missing")
 	}
-	if !strings.Contains(out, "╭") || !strings.Contains(out, "╰") {
+	if !strings.Contains(plain, promptIcon) {
+		t.Fatal("prompt icon missing")
+	}
+	if !strings.Contains(plain, "╭") || !strings.Contains(plain, "╰") {
 		t.Fatal("input box border missing")
 	}
-	last := lines[len(lines)-1]
-	if !strings.Contains(last, "󰌑 : submit") || !strings.Contains(last, "󱊷 : cancel") {
-		t.Fatalf("hint line wrong: %q", last)
+	if !strings.Contains(plain, "󰌑 submit") || !strings.Contains(plain, "󱊷 cancel") {
+		t.Fatalf("hint line wrong:\n%s", plain)
+	}
+	if !strings.Contains(plain, "󰘶󰌑 newline") {
+		t.Fatal("text hint must offer newline")
 	}
 }
 
-// TestPopupInputArea pins the chrome budget: ai-assist-popup opens a 55-col
-// float (→ 53-col content area), and the input area must come out 40x3.
+// TestLineHasNoScrollbarOrNewline pins the line variant: single row, no
+// scrollbar, and a hint without the newline affordance.
+func TestLineHasNoScrollbarOrNewline(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "Name", "", "type…", 1, 1, 1, true)
+	m.width = 60
+	m.resize()
+	plain := strip(m.render())
+	if strings.Contains(plain, "┃") {
+		t.Fatal("line must not render a scroll thumb")
+	}
+	if strings.Contains(plain, "newline") {
+		t.Fatal("line hint must not offer newline")
+	}
+	if !strings.Contains(plain, "󰌑 submit") || !strings.Contains(plain, "󱊷 cancel") {
+		t.Fatalf("line hint wrong:\n%s", plain)
+	}
+}
+
+// TestPopupInputArea pins the chrome budget against the named frame/box
+// constants rather than a magic number, and the input height against --height.
 func TestPopupInputArea(t *testing.T) {
 	m := initialModel("", "ai-assist", 3)
-	m.width = 53 // 55-col float minus the pane border
+	m.width = 57
 	m.resize()
-	if w, h := m.textarea.Width(), m.textarea.Height(); w != 40 || h != 3 {
-		t.Fatalf("input area = %dx%d, want 40x3 (chrome assumes a 55-col float)", w, h)
+	wantW := 57 - (frameBorder + 2*frameHPad + boxBorder + boxPadL + iconCol + scrollGap + scrollCol)
+	if w, h := m.textarea.Width(), m.textarea.Height(); w != wantW || h != 3 {
+		t.Fatalf("input area = %dx%d, want %dx3", w, h, wantW)
 	}
 }
 

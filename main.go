@@ -6,315 +6,55 @@ import (
 	"os"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
-	"charm.land/bubbles/v2/textarea"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 )
 
-// Catppuccin Mocha palette. Border/rule/hint match the other floating dialogs
-// (pick-glyph): rule = Surface0, border + hint = Surface2.
-const (
-	colorMauve    = "#cba6f7" // title + prompt icon (accent)
-	colorText     = "#cdd6f4" // textarea text
-	colorSurface0 = "#313244" // title rule + scroll track
-	colorSurface2 = "#585b70" // input box border + hint text
-	colorOverlay1 = "#7f849c" // scroll thumb
-)
-
-// Layout. The modal is rendered entirely here (the wrapper just provides the
-// floating pane), top to bottom:
-//
-//	  ▓▓▓ <title>            title   — 2-col indent
-//	  ━━━…                   rule    — 2-col indent, (width-4) wide
-//	  ╭…╮                    box top — 2-col left margin
-//	  │ 󰧑  <text…>      ┃│   icon column + textarea + scroll column
-//	  ╰…╯
-//	    󰌑 : submit • …       hint    — aligned under the box content
-//
-// Width budget: cells the chrome takes out of the pane WIDTH around the textarea.
-// Height is fixed (from --height; see resize) so long content scrolls.
-const (
-	frameWidth = 2 // rounded border, left + right
-	framePad   = 2 // border padding, left + right
-	scrollCol  = 1 // scroll-indicator column
-	scrollGap  = 1 // space between the input text and the scroll column
-	iconCol    = 3 // prompt-icon column ("󰧑" + 2-space gap)
-	boxMargin  = 2 // inset of the input box from each pane edge
-)
-
-const promptIcon = "󰧑"
-
-type model struct {
-	textarea  textarea.Model
-	title     string
-	width     int // pane width (from WindowSizeMsg)
-	taHeight  int // textarea viewport rows (from --height; fixed)
-	submitted bool
-	quitting  bool
-}
-
-func initialModel(value, title string, height int) model {
-	ta := textarea.New()
-	ta.Placeholder = ""
-	ta.ShowLineNumbers = false
-	ta.DynamicHeight = false // fixed viewport → long content scrolls, doesn't grow
-	ta.Prompt = ""           // the prompt icon is rendered as a separate column in View
-
-	// Borderless textarea; View() paints the rounded frame + the scroll column so
-	// they sit together. No cursor-line highlight — the editing area stays one
-	// uniform color.
-	s := textarea.DefaultDarkStyles()
-	text := lipgloss.NewStyle().Foreground(lipgloss.Color(colorText))
-	s.Focused.Base = lipgloss.NewStyle()
-	s.Blurred.Base = lipgloss.NewStyle()
-	s.Focused.Text = text
-	s.Blurred.Text = text
-	s.Focused.CursorLine = lipgloss.NewStyle()
-	s.Blurred.CursorLine = lipgloss.NewStyle()
-	ta.SetStyles(s)
-
-	if value != "" {
-		ta.SetValue(value)
-		ta.MoveToEnd()
-	}
-
-	// Focus the model NewProgram actually runs (not a discarded Init() copy).
-	ta.Focus()
-
-	// Height is fixed (from --height); width gets a default until the first
-	// WindowSizeMsg sizes us to the pane width.
-	ta.SetWidth(60)
-	ta.SetHeight(height)
-
-	return model{textarea: ta, title: title, width: 64, taHeight: height}
-}
-
-func (m model) Init() tea.Cmd {
-	return textarea.Blink
-}
-
-// resize sets the textarea WIDTH from the pane; height stays fixed at taHeight.
-func (m *model) resize() {
-	innerW := m.width - frameWidth - framePad - scrollCol - scrollGap - iconCol - 2*boxMargin
-	if innerW < 1 {
-		innerW = 1
-	}
-	m.textarea.SetWidth(innerW)
-	m.textarea.SetHeight(m.taHeight)
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width // width only — height is fixed (--height)
-		m.resize()
-		return m, nil
-	case tea.PasteMsg:
-		// Bracketed paste: insert the full pasted content (including any embedded
-		// newlines) without triggering submit. Bubbletea v2 enables bracketed paste
-		// by default (opt-out via View.DisableBracketedPasteMode); pasted text
-		// arrives here as a PasteMsg rather than as individual key events, so the
-		// plain-Enter submit path is never triggered by pasted newlines.
-		m.textarea.InsertString(msg.Content)
-		return m, nil
-	case tea.KeyPressMsg:
-		key := msg.Key()
-		switch {
-		case key.Code == tea.KeyEscape:
-			m.quitting = true
-			return m, tea.Quit
-		case key.Code == tea.KeyEnter && key.Mod.Contains(tea.ModShift):
-			// Shift+Enter: insert a newline explicitly. Forwarding the key to the
-			// textarea does nothing — its InsertNewline binding matches only plain
-			// Enter, not the shifted chord.
-			m.textarea.InsertRune('\n')
-			return m, nil
-		case key.Code == tea.KeyEnter:
-			m.submitted = true
-			return m, tea.Quit
-		case msg.String() == "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		}
-	}
-
-	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
-	return m, cmd
-}
-
-// visualLineCount counts the wrapped (visual) rows the content occupies, so the
-// scrollbar reflects soft-wrapping rather than logical lines. The textarea's own
-// word-wrap is unexported, so this estimates each logical line's height as
-// ceil(displayWidth / textareaWidth); the caller clamps the total to the actual
-// scroll offset so the thumb is never inconsistent with what's on screen.
-func visualLineCount(m model) int {
-	w := m.textarea.Width()
-	if w < 1 {
-		return m.textarea.LineCount()
-	}
-	total := 0
-	for _, line := range strings.Split(m.textarea.Value(), "\n") {
-		rows := (lipgloss.Width(line) + w - 1) / w
-		if rows < 1 {
-			rows = 1
-		}
-		total += rows
-	}
-	return total
-}
-
-// scrollbar renders a single-column, viewport-height indicator beside the
-// textarea. It reserves the column with blanks when everything fits, and shows
-// a proportional thumb once the content (wrapped) scrolls past the viewport.
-func scrollbar(m model) string {
-	h := m.textarea.Height()
-	if h < 1 {
-		h = 1
-	}
-	off := m.textarea.ScrollYOffset()
-	total := visualLineCount(m)
-	if total < off+h { // never under-report vs the actual visual scroll position
-		total = off + h
-	}
-	if total <= h {
-		return strings.TrimRight(strings.Repeat(" \n", h), "\n")
-	}
-
-	thumb := h * h / total
-	if thumb < 1 {
-		thumb = 1
-	}
-	maxOff := total - h
-	pos := 0
-	if maxOff > 0 {
-		pos = (h - thumb) * off / maxOff
-	}
-
-	track := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface0))
-	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay1))
-	rows := make([]string, h)
-	for i := range rows {
-		if i >= pos && i < pos+thumb {
-			rows[i] = thumbStyle.Render("┃")
-		} else {
-			rows[i] = track.Render("│")
-		}
-	}
-	return strings.Join(rows, "\n")
-}
-
-// iconColumn renders the prompt-icon column beside the textarea: the icon on the
-// first row, blanks on the rest, so the input's continuation lines stay aligned
-// under the text rather than under the icon.
-func iconColumn(h int) string {
-	if h < 1 {
-		h = 1
-	}
-	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMauve)).Render(promptIcon)
-	rows := make([]string, h)
-	rows[0] = icon + "  " // icon (1 cell) + 2-space gap = iconCol wide (no leading space)
-	for i := 1; i < h; i++ {
-		rows[i] = strings.Repeat(" ", iconCol)
-	}
-	return strings.Join(rows, "\n")
-}
-
-// render builds the full modal frame as a string (View wraps it; kept separate
-// so it's testable without a TTY).
-func (m model) render() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorMauve))
-	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface0))
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorSurface2))
-
-	indent := strings.Repeat(" ", boxMargin)
-	ruleW := m.width - 2*boxMargin
-	if ruleW < 1 {
-		ruleW = 1
-	}
-	title := indent + titleStyle.Render("▓▓▓ "+m.title)
-	rule := indent + ruleStyle.Render(strings.Repeat("━", ruleW))
-
-	// A scrollGap-wide blank column keeps the input text off the scroll column
-	// (the icon + text shifted one column left; this absorbs the freed column so
-	// the box width and the flush scrollbar are unchanged).
-	gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", m.textarea.Height()), "\n")
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height()), m.textarea.View(), gap, scrollbar(m))
-	box := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(colorSurface2)).
-		Padding(0, 0, 0, 1). // no right padding → the scroll column sits flush to the border
-		MarginLeft(boxMargin).
-		Render(body)
-
-	// Hint indent aligns under the box content: margin + left border + left pad.
-	hintIndent := strings.Repeat(" ", boxMargin+frameWidth/2+framePad/2)
-	hint := hintStyle.Render(hintIndent + "󰌑 : submit • 󰘶 󰌑 : newline • 󱊷 : cancel")
-
-	return title + "\n" + rule + "\n" + box + "\n" + hint
-}
-
-func (m model) View() tea.View {
-	v := tea.NewView(m.render())
-	// Kitty keyboard enhancements so Shift+Enter (delivered as \e[13;2u) is
-	// distinguishable from plain Enter.
-	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true}
-	return v
-}
-
 func main() {
-	// Force narrow (1-cell) accounting for East-Asian-ambiguous characters and
-	// nerd-font glyphs (the prompt/hint icons), so lipgloss's width matches what
-	// the terminal renders and the icon column stays aligned. Must run before any
-	// lipgloss call.
+	// Narrow (1-cell) accounting for ambiguous-width + nerd-font glyphs so
+	// lipgloss widths match the terminal. Must run before any lipgloss call.
 	os.Setenv("RUNEWIDTH_EASTASIAN", "0")
 	runewidth.DefaultCondition.EastAsianWidth = false
 
-	var value, title string
-	var height int
-	flag.StringVar(&value, "value", "", "initial textarea content")
-	flag.StringVar(&title, "title", "", "modal title shown above the input (e.g. \"ai-assist\")")
-	flag.IntVar(&height, "height", 10, "textarea viewport height in rows (the popup sets this so the modal fits the float)")
-	flag.Parse()
-	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: unexpected arguments: %v\n", flag.Args())
-		flag.Usage()
-		os.Exit(1)
+	fs := flag.NewFlagSet("ai-assist-input", flag.ExitOnError)
+	var typ, title, value, placeholder, variant, affirmative, negative, defaultSide string
+	var height, padding, inset int
+	var danger, warning bool
+	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm")
+	fs.StringVar(&title, "title", "", "modal title")
+	fs.StringVar(&value, "value", "", "initial value (text|line)")
+	fs.StringVar(&placeholder, "placeholder", "", "placeholder (line)")
+	fs.IntVar(&height, "height", 10, "textarea viewport rows (text)")
+	fs.IntVar(&padding, "padding", 1, "frame vertical padding rows")
+	fs.IntVar(&inset, "inset", 1, "frame inter-section blank rows")
+	fs.StringVar(&variant, "variant", "default", "default|danger|warning")
+	fs.BoolVar(&danger, "danger", false, "shorthand for --variant danger")
+	fs.BoolVar(&warning, "warning", false, "shorthand for --variant warning")
+	fs.StringVar(&affirmative, "affirmative", "Yes", "confirm affirmative label")
+	fs.StringVar(&negative, "negative", "No", "confirm negative label")
+	fs.StringVar(&defaultSide, "default", "affirmative", "confirm default focus: affirmative|negative")
+	theme := registerThemeFlags(fs)
+	fs.Parse(os.Args[1:])
+
+	if danger {
+		variant = "danger"
 	}
-	if height < 1 {
-		height = 1
+	if warning {
+		variant = "warning"
+	}
+	if variant == "danger" {
+		defaultSide = "negative" // never default to a destructive action
 	}
 
-	// Render the TUI to stderr and keep stdout for the result only. Our caller
-	// (zellij-modal --capture) redirects this process's stdout to a file to
-	// capture the submitted text; if the TUI rendered to stdout, bubbletea would
-	// see a non-TTY stdout and exit immediately (the "popup blinks" bug). stderr
-	// stays attached to the pane's tty in both the capture path and the inline
-	// fallback, so the UI shows there and the result goes to stdout.
-	//
-	// Force TrueColor: over SSH / in zellij's pane, bubbletea's auto-detection
-	// underreports the color profile and downsamples the Catppuccin truecolor
-	// hexes to the nearest 256-color (e.g. #585b70 → #5f5f87). The terminal is
-	// truecolor-capable, so pin it (same fix the pager uses).
-	finalModel, err := tea.NewProgram(
-		initialModel(value, title, height),
-		tea.WithOutput(os.Stderr),
-		tea.WithColorProfile(colorprofile.TrueColor),
-	).Run()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
-		os.Exit(1)
+	switch typ {
+	case "confirm":
+		prompt := strings.Join(fs.Args(), " ") // prompt passed after `--`
+		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset)
+	case "line":
+		runInput(*theme, variant, title, value, placeholder, 1, padding, inset, true)
+	case "text":
+		runInput(*theme, variant, title, value, "", height, padding, inset, false)
+	default:
+		fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
+		os.Exit(2)
 	}
-
-	result, ok := finalModel.(model)
-	if !ok {
-		os.Exit(1)
-	}
-	if result.submitted {
-		fmt.Print(result.textarea.Value())
-		os.Exit(0)
-	}
-	os.Exit(130) // cancelled (Esc or Ctrl+C)
 }
