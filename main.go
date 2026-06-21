@@ -82,7 +82,7 @@ func main() {
 		case "choose":
 			m := newChooseModel(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
 			m.width = width
-			rendered = m.maxRender()
+			rendered = m.render()
 		case "form":
 			var raw string
 			if spec != "" {

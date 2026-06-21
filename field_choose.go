@@ -34,14 +34,20 @@ type chooseField struct {
 	highlight int    // currently highlighted row index (0-based, over all rows)
 	selected  int    // single mode: selected option index (-1 = none)
 	toggled   []bool // multi mode: toggled[i] for options[i]
-	// otherField is lazily created when the highlight first lands on the other row.
-	// It is implicitly active whenever isOtherRow(highlight) is true.
+	// otherField is created eagerly when otherLabel != ""; it always renders its
+	// 4-line box (static height, no resize on focus).
 	otherField *textField
 }
 
 // newChooseField constructs a chooseField. other=="" → no free-text entry.
+// When other is non-empty, the embedded textField is created eagerly so the
+// other row always renders its 4-line box (no lazy creation, no resize on focus).
 func newChooseField(theme Theme, variant string, options []string, multi bool, other string) *chooseField {
 	toggled := make([]bool, len(options))
+	var otherField *textField
+	if other != "" {
+		otherField = newTextField(theme, "", other, 2, false)
+	}
 	return &chooseField{
 		theme:      theme,
 		variant:    variant,
@@ -51,6 +57,7 @@ func newChooseField(theme Theme, variant string, options []string, multi bool, o
 		highlight:  0,
 		selected:   -1,
 		toggled:    toggled,
+		otherField: otherField,
 	}
 }
 
@@ -80,13 +87,8 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 
 	// When the highlight is on the other row, the embedded textField is implicitly
 	// active. Route keys to it EXCEPT for navigation/submit/cancel keys that belong
-	// to the choose layer.
+	// to the choose layer. otherField is always non-nil when otherLabel != "".
 	if c.isOtherRow(c.highlight) {
-		// Lazily initialise the other field the first time we land on the row.
-		if c.otherField == nil {
-			c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
-		}
-
 		switch {
 		case kp.Code == tea.KeyEscape:
 			return &c, fieldCancel, nil
@@ -136,10 +138,6 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 	case kp.Code == 'j' || kp.Code == tea.KeyDown:
 		if c.highlight < total-1 {
 			c.highlight++
-			// Lazily initialise the other field when we first land on the other row.
-			if c.isOtherRow(c.highlight) && c.otherField == nil {
-				c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
-			}
 		}
 		return &c, fieldNone, nil
 
@@ -319,13 +317,12 @@ func (f *chooseField) view(innerW int, focused bool) string {
 		isHL := focused && i == f.highlight
 
 		if f.isOtherRow(i) {
-			// The "other" row uses the same gutterLen gutter as option rows.
+			// The "other" row always renders as a 4-line box (static height).
 			// Indicator: single → checked radio when highlighted; multi → checked
-			// checkbox when the other field has text (Task 3 will refine this further).
+			// checkbox when the other field has text.
 			var otherIndicator string
 			if f.multi {
-				hasText := f.otherField != nil && f.otherField.value() != ""
-				if hasText {
+				if f.otherField.value() != "" {
 					otherIndicator = checkboxChecked
 				} else {
 					otherIndicator = checkboxEmpty
@@ -337,35 +334,36 @@ func (f *chooseField) view(innerW int, focused bool) string {
 					otherIndicator = radioEmpty
 				}
 			}
-			if isHL && f.otherField != nil {
-				// Render inline text field with aligned gutter.
-				// The gutter (" <indicator> ") is prefixed on the FIRST line;
-				// continuation lines get gutterLen spaces so the box border aligns.
-				gutterText := " " + otherIndicator + " "
-				gutterBlank := strings.Repeat(" ", gutterLen)
-				boxW := innerW - gutterLen
-				if boxW < 1 {
-					boxW = 1
-				}
-				boxView := f.otherField.view(boxW, true)
-				boxLines := strings.Split(boxView, "\n")
-				var guttered []string
-				for li, bl := range boxLines {
-					if li == 0 {
-						guttered = append(guttered, mutedStyle.Render(gutterText)+bl)
-					} else {
-						guttered = append(guttered, gutterBlank+bl)
-					}
-				}
-				rows = append(rows, guttered...)
-			} else {
-				label := " " + otherIndicator + " " + f.otherLabel + " "
-				if isHL {
-					rows = append(rows, hlStyle.Width(innerW).Render(label))
+
+			// Always render the box. The gutter (" <indicator> ") is prefixed on
+			// the FIRST line; continuation lines get gutterLen spaces for alignment.
+			gutterText := " " + otherIndicator + " "
+			gutterBlank := strings.Repeat(" ", gutterLen)
+			boxW := innerW - gutterLen
+			if boxW < 1 {
+				boxW = 1
+			}
+			// Pass focused=true so the box always renders with its active style;
+			// when the other row is not highlighted we still show the box but
+			// apply gutter in muted style.
+			boxView := f.otherField.view(boxW, isHL)
+			boxLines := strings.Split(boxView, "\n")
+			var guttered []string
+			for li, bl := range boxLines {
+				var line string
+				if li == 0 {
+					line = mutedStyle.Render(gutterText) + bl
 				} else {
-					rows = append(rows, mutedStyle.Render(label))
+					line = gutterBlank + bl
+				}
+				if isHL {
+					// Full-item highlight: pad all 4 lines to innerW.
+					guttered = append(guttered, hlStyle.Width(innerW).Render(line))
+				} else {
+					guttered = append(guttered, line)
 				}
 			}
+			rows = append(rows, guttered...)
 			continue
 		}
 
@@ -443,11 +441,15 @@ func (f *chooseField) filled() bool {
 
 // optionLineCount returns the number of visual lines a single option row at
 // index i occupies given innerW, accounting for label wrapping.
-// The "other" row always occupies 1 line (or otherField.lines() when active,
-// handled separately in lines()).
+// The "other" row always occupies 4 lines (2-row textarea + top/bottom border).
 func (f *chooseField) optionLineCount(i, innerW int) int {
 	if f.isOtherRow(i) {
-		return 1
+		// Static 4-line box: always use otherField.lines() (= taHeight + boxBorder = 4).
+		boxW := innerW - gutterLen
+		if boxW < 1 {
+			boxW = 1
+		}
+		return f.otherField.lines(boxW)
 	}
 	textColW := innerW - gutterLen
 	if textColW < 1 {
@@ -459,23 +461,14 @@ func (f *chooseField) optionLineCount(i, innerW int) int {
 
 // lines returns the rendered height of this field.
 // It mirrors the row count that view() emits: window rows + indicator rows.
-// When the other row is highlighted and the embedded textField is visible, its
-// multi-line box (border + textarea height) is substituted for the single-row
-// placeholder.  When option labels wrap, each extra visual line is counted.
+// The "other" row always counts as its box height (4 lines) regardless of
+// focus, so lines() is static for a given option set and width.
+// When option labels wrap, each extra visual line is counted.
 func (f *chooseField) lines(innerW int) int {
 	viewStart, viewEnd, showUp, showDown := f.windowBounds()
 	count := 0
 	for i := viewStart; i < viewEnd; i++ {
-		if f.isOtherRow(i) && f.isOtherRow(f.highlight) && f.otherField != nil {
-			// The gutter takes gutterLen chars; pass remaining width to the box.
-			boxW := innerW - gutterLen
-			if boxW < 1 {
-				boxW = 1
-			}
-			count += f.otherField.lines(boxW)
-		} else {
-			count += f.optionLineCount(i, innerW)
-		}
+		count += f.optionLineCount(i, innerW)
 	}
 	if showUp {
 		count++
@@ -484,26 +477,6 @@ func (f *chooseField) lines(innerW int) int {
 		count++
 	}
 	return count
-}
-
-// maxLines returns the worst-case rendered height of this field at the given
-// innerW. When the choose has an "other" row, that row expands to show an
-// embedded textField box (border + textarea row) when highlighted; the
-// collapsed 1-line placeholder underestimates the pane size needed. This
-// method computes the height as if the other row is focused/expanded so that
-// --measure reports a height that fits every navigable state.
-func (f *chooseField) maxLines(innerW int) int {
-	if f.otherLabel == "" {
-		return f.lines(innerW)
-	}
-	// Build a temporary copy with the highlight on the other row so that the
-	// embedded textField is lazily initialised and the expanded render is used.
-	tmp := *f
-	tmp.highlight = tmp.totalRows() - 1 // other row is always last
-	if tmp.otherField == nil {
-		tmp.otherField = newTextField(tmp.theme, "", tmp.otherLabel, 1, false)
-	}
-	return tmp.lines(innerW)
 }
 
 // initCmd returns nil — the choose field needs no cursor blink.

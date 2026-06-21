@@ -110,29 +110,6 @@ func (m chooseModel) render() string {
 	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
 }
 
-// maxRender renders as if the worst-case navigable state is active (other row
-// expanded). When there is no "other" row this is identical to render(). Used
-// by --measure so the reported height fits every state the user can navigate to.
-func (m chooseModel) maxRender() string {
-	if m.fld.otherLabel == "" {
-		return m.render()
-	}
-	iW := m.innerW()
-	// Build a temporary field with the highlight on the other row and the
-	// embedded textField lazily initialised so view() renders the expanded box.
-	tmp := *m.fld
-	tmp.highlight = tmp.totalRows() - 1
-	if tmp.otherField == nil {
-		tmp.otherField = newTextField(tmp.theme, "", tmp.otherLabel, 1, false)
-	}
-	sections := []string{}
-	if m.prompt != "" {
-		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
-	}
-	sections = append(sections, tmp.view(iW, true))
-	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
-}
-
 func (m chooseModel) View() tea.View { return tea.NewView(m.render()) }
 
 func runChoose(theme Theme, variant, title, prompt string, options []string, multi bool, other string, padding, inset int) {

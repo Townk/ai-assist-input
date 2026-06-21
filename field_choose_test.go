@@ -236,33 +236,36 @@ func TestChooseMultiSelectionsPreservedWhenEmptyOtherFocused(t *testing.T) {
 	}
 }
 
-// I1: the worst-case (max) measured height of a choose with --other must
-// account for the other row being expanded (embedded textField visible), not
-// the 1-line collapsed placeholder.
-func TestChooseOtherMaxLinesAccountsForExpandedRow(t *testing.T) {
-	const innerW = 50
-	// A choose with 2 options + other row.
+// Task 3: the "other" row must always render as a 4-line box (2-row textarea
+// + top/bottom border), regardless of whether it is focused. Height must be
+// identical focused vs unfocused, and the box border must appear even when
+// the other row is not highlighted.
+func TestChooseOtherIsAlwaysFourLines(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")
-
-	// Collapsed (other row not focused): measure the collapsed line count.
-	collapsedLines := f.lines(innerW)
-
-	// Navigate onto the other row so it expands.
-	fExpanded := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
-	fExpanded, _, _ = fExpanded.handle(tea.KeyPressMsg{Code: tea.KeyDown})
-	fExpanded, _, _ = fExpanded.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // on other row
-
-	expandedLines := fExpanded.lines(innerW)
-
-	if expandedLines <= collapsedLines {
-		t.Fatalf("expanded other row must be taller than collapsed: collapsed=%d expanded=%d", collapsedLines, expandedLines)
+	unfocused := strip(f.view(40, true)) // highlight on row 0 → other (idx 2) unfocused
+	g, _, _ := field(f).handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	g, _, _ = g.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto other row
+	focused := strip(g.view(40, true))
+	if len(strings.Split(unfocused, "\n")) != len(strings.Split(focused, "\n")) {
+		t.Fatalf("other height must NOT change on focus: %d vs %d",
+			len(strings.Split(unfocused, "\n")), len(strings.Split(focused, "\n")))
 	}
+	if !strings.Contains(unfocused, "╭") || !strings.Contains(unfocused, "╰") {
+		t.Fatalf("other input box must render even unfocused: %q", unfocused)
+	}
+}
 
-	// maxLines() on the original (not-yet-navigated) field must equal expandedLines —
-	// it must report the worst-case height regardless of current highlight position.
-	got := f.maxLines(innerW)
-	if got != expandedLines {
-		t.Fatalf("maxLines(%d)=%d want %d (expanded other row height)", innerW, got, expandedLines)
+// Task 3: focus-to-type on the other row must still accept typed text and
+// submit it on Enter.
+func TestChooseOtherFocusToTypeStillWorks(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a"}, false, "Other…"))
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto other row (idx 1)
+	for _, r := range "hi" {
+		f, _, _ = f.handle(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	f2, act, _ := f.handle(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if act != fieldDone || f2.value() != "hi" {
+		t.Fatalf("focus-to-type other still submits typed value: act=%d val=%q", act, f2.value())
 	}
 }
 
