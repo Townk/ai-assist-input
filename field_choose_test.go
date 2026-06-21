@@ -209,6 +209,28 @@ func TestChooseMultiSpaceAsRune(t *testing.T) {
 	}
 }
 
+func TestChooseMultiSelectionsPreservedWhenEmptyOtherFocused(t *testing.T) {
+	// Regression: toggling options then arrowing onto the (empty) other row and
+	// pressing Enter must return the toggled options, NOT "".
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, true, "Other…"))
+	// Toggle "a" (highlight=0)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeySpace})
+	// Move to "c" and toggle it
+	f, _, _ = f.handle(key('j'))
+	f, _, _ = f.handle(key('j'))
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeySpace})
+	// Arrow down onto the "other" row (index 3), leaving its buffer empty
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	// Press Enter — should submit with "a\nc", not ""
+	f2, act, _ := f.handle(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if act != fieldDone {
+		t.Fatalf("Enter must submit, act=%d", act)
+	}
+	if got := f2.value(); got != "a\nc" {
+		t.Fatalf("multi value with empty other row = %q, want \"a\\nc\"", got)
+	}
+}
+
 func TestChooseHintRangeAndEscGlyph(t *testing.T) {
 	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/)
 	plain := strip(h)

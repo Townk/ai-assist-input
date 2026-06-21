@@ -399,21 +399,26 @@ func (f *chooseField) view(innerW int, focused bool) string {
 // Single: selected option or typed other text.
 // Multi: \n-joined selected options (+ other text if set).
 func (f *chooseField) value() string {
-	// When the highlight is on the other row and there's an active embedded field,
-	// return its current buffer (this covers both the in-progress and submitted cases).
+	// When the highlight is on the other row and the embedded field has text,
+	// that text takes part in (or becomes) the value.  When the buffer is EMPTY
+	// we fall through to the normal single/multi logic so that toggled options
+	// are not silently discarded.
 	if f.isOtherRow(f.highlight) && f.otherField != nil {
 		otherVal := f.otherField.value()
-		if f.multi && otherVal != "" {
-			var parts []string
-			for i, opt := range f.options {
-				if f.toggled[i] {
-					parts = append(parts, opt)
+		if otherVal != "" {
+			if f.multi {
+				var parts []string
+				for i, opt := range f.options {
+					if f.toggled[i] {
+						parts = append(parts, opt)
+					}
 				}
+				parts = append(parts, otherVal)
+				return strings.Join(parts, "\n")
 			}
-			parts = append(parts, otherVal)
-			return strings.Join(parts, "\n")
+			return otherVal
 		}
-		return otherVal
+		// otherVal is empty — fall through to normal single/multi logic below.
 	}
 	if f.multi {
 		var parts []string
