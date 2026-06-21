@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 )
@@ -21,19 +20,21 @@ const (
 	scrollCol = 1 // scroll-indicator column
 )
 
+// model is the thin standalone bubbletea model. It wraps a single field and
+// owns the frame (title/prompt/variant/theme/width/padding/inset).
 type model struct {
-	textarea   textarea.Model
-	theme      Theme
-	variant    string
-	title      string
-	prompt     string
+	fld       field
+	theme     Theme
+	variant   string
+	title     string
+	prompt    string
+	width     int
+	padding   int
+	inset     int
+	submitted bool
+	quitting  bool
+	// singleLine is kept for hint rendering only.
 	singleLine bool
-	width      int
-	taHeight   int
-	padding    int
-	inset      int
-	submitted  bool
-	quitting   bool
 }
 
 // initialModel keeps the original signature the existing tests call (text, 1/1
@@ -43,56 +44,30 @@ func initialModel(value, title string, height int) model {
 }
 
 func newInputModel(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool) model {
-	ta := textarea.New()
-	ta.Placeholder = placeholder
-	ta.ShowLineNumbers = false
-	ta.DynamicHeight = false
-	ta.Prompt = ""
-
-	s := textarea.DefaultDarkStyles()
-	text := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Text))
-	s.Focused.Base = lipgloss.NewStyle()
-	s.Blurred.Base = lipgloss.NewStyle()
-	s.Focused.Text = text
-	s.Blurred.Text = text
-	s.Focused.CursorLine = lipgloss.NewStyle()
-	s.Blurred.CursorLine = lipgloss.NewStyle()
-	ta.SetStyles(s)
-
-	if value != "" {
-		ta.SetValue(value)
-		ta.MoveToEnd()
-	}
-	ta.Focus()
-	if height < 1 {
-		height = 1
-	}
-	ta.SetWidth(60)
-	ta.SetHeight(height)
-
+	fld := newTextField(theme, value, placeholder, height, singleLine)
 	return model{
-		textarea: ta, theme: theme, variant: variant, title: title, prompt: prompt,
-		singleLine: singleLine, width: 64, taHeight: height,
+		fld: fld, theme: theme, variant: variant, title: title, prompt: prompt,
+		singleLine: singleLine, width: 64,
 		padding: padding, inset: inset,
 	}
 }
 
-func (m model) Init() tea.Cmd { return textarea.Blink }
+func (m model) Init() tea.Cmd { return m.fld.initCmd() }
 
-// resize sets the textarea width from the pane, subtracting the outer frame
-// (border + h-padding) and the inner box (border + left pad + icon, plus the
-// scroll columns for multi-line text).
+// innerW computes the width available inside the outer frame for the field.
+func (m *model) innerW() int {
+	w := m.width - frameBorder - 2*frameHPad
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
+// resize re-sizes the field from the current pane width.
 func (m *model) resize() {
-	chrome := frameBorder + 2*frameHPad + boxBorder + boxPadL + iconCol
-	if !m.singleLine {
-		chrome += scrollGap + scrollCol
+	if tf, ok := m.fld.(*textField); ok {
+		tf.setWidth(m.innerW())
 	}
-	innerW := m.width - chrome
-	if innerW < 1 {
-		innerW = 1
-	}
-	m.textarea.SetWidth(innerW)
-	m.textarea.SetHeight(m.taHeight)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -101,100 +76,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.resize()
 		return m, nil
-	case tea.PasteMsg:
-		m.textarea.InsertString(msg.Content)
-		return m, nil
-	case tea.KeyPressMsg:
-		key := msg.Key()
-		switch {
-		case key.Code == tea.KeyEscape:
-			m.quitting = true
-			return m, tea.Quit
-		case key.Code == tea.KeyEnter && key.Mod.Contains(tea.ModShift):
-			if !m.singleLine { // line never inserts newlines
-				m.textarea.InsertRune('\n')
-			}
-			return m, nil
-		case key.Code == tea.KeyEnter:
-			m.submitted = true
-			return m, tea.Quit
-		case msg.String() == "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		}
 	}
-	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
+	f, act, cmd := m.fld.handle(msg)
+	m.fld = f
+	switch act {
+	case fieldDone:
+		m.submitted = true
+		return m, tea.Quit
+	case fieldCancel:
+		m.quitting = true
+		return m, tea.Quit
+	}
 	return m, cmd
 }
 
-// --- helpers moved verbatim from the old main.go ---------------------------
-
-func visualLineCount(m model) int {
-	w := m.textarea.Width()
-	if w < 1 {
-		return m.textarea.LineCount()
-	}
-	total := 0
-	for _, line := range strings.Split(m.textarea.Value(), "\n") {
-		rows := (lipgloss.Width(line) + w - 1) / w
-		if rows < 1 {
-			rows = 1
-		}
-		total += rows
-	}
-	return total
-}
-
-func scrollbar(m model) string {
-	h := m.textarea.Height()
-	if h < 1 {
-		h = 1
-	}
-	off := m.textarea.ScrollYOffset()
-	total := visualLineCount(m)
-	if total < off+h {
-		total = off + h
-	}
-	if total <= h {
-		return strings.TrimRight(strings.Repeat(" \n", h), "\n")
-	}
-	thumb := h * h / total
-	if thumb < 1 {
-		thumb = 1
-	}
-	maxOff := total - h
-	pos := 0
-	if maxOff > 0 {
-		pos = (h - thumb) * off / maxOff
-	}
-	track := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Rule))
-	thumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.ScrollThumb))
-	rows := make([]string, h)
-	for i := range rows {
-		if i >= pos && i < pos+thumb {
-			rows[i] = thumbStyle.Render("┃")
-		} else {
-			rows[i] = track.Render("│")
-		}
-	}
-	return strings.Join(rows, "\n")
-}
-
-func iconColumn(h int, theme Theme) string {
-	if h < 1 {
-		h = 1
-	}
-	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Accent)).Render(promptIcon)
-	rows := make([]string, h)
-	rows[0] = icon + "  "
-	for i := 1; i < h; i++ {
-		rows[i] = strings.Repeat(" ", iconCol)
-	}
-	return strings.Join(rows, "\n")
-}
-
-// --- render ----------------------------------------------------------------
+// --- render ------------------------------------------------------------------
 
 func (m model) hint() string {
 	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Key))
@@ -208,21 +104,12 @@ func (m model) hint() string {
 }
 
 func (m model) render() string {
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(m.textarea.Height(), m.theme), m.textarea.View())
-	if !m.singleLine {
-		gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", m.textarea.Height()), "\n")
-		body = lipgloss.JoinHorizontal(lipgloss.Top, body, gap, scrollbar(m))
-	}
-	box := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.theme.FieldBorder)).
-		Padding(0, 0, 0, boxPadL).
-		Render(body)
+	iW := m.innerW()
 	sections := []string{}
 	if m.prompt != "" {
 		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
 	}
-	sections = append(sections, box)
+	sections = append(sections, m.fld.view(iW, true))
 	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
 }
 
@@ -244,7 +131,7 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 	}
 	res := fm.(model)
 	if res.submitted {
-		fmt.Print(res.textarea.Value())
+		fmt.Print(res.fld.value())
 		os.Exit(0)
 	}
 	os.Exit(130)

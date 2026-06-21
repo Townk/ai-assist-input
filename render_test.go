@@ -116,7 +116,8 @@ func TestPopupInputArea(t *testing.T) {
 	m.width = 57
 	m.resize()
 	wantW := 57 - (frameBorder + 2*frameHPad + boxBorder + boxPadL + iconCol + scrollGap + scrollCol)
-	if w, h := m.textarea.Width(), m.textarea.Height(); w != wantW || h != 3 {
+	tf := m.fld.(*textField)
+	if w, h := tf.ta.Width(), tf.ta.Height(); w != wantW || h != 3 {
 		t.Fatalf("input area = %dx%d, want %dx3", w, h, wantW)
 	}
 }
@@ -128,13 +129,14 @@ func TestScrollbarWrappedLines(t *testing.T) {
 	m := initialModel(strings.Repeat("x", 200), "ai-assist", 3) // 1 logical line → ~5 wrapped rows at width 40
 	m.width = 53
 	m.resize()
-	if vc := visualLineCount(m); vc <= m.textarea.Height() {
-		t.Fatalf("visualLineCount = %d, want > %d (content wraps past the viewport)", vc, m.textarea.Height())
+	tf := m.fld.(*textField)
+	if vc := visualLineCount(tf); vc <= tf.ta.Height() {
+		t.Fatalf("visualLineCount = %d, want > %d (content wraps past the viewport)", vc, tf.ta.Height())
 	}
-	if m.textarea.LineCount() != 1 {
-		t.Fatalf("precondition: expected 1 logical line, got %d", m.textarea.LineCount())
+	if tf.ta.LineCount() != 1 {
+		t.Fatalf("precondition: expected 1 logical line, got %d", tf.ta.LineCount())
 	}
-	if sb := scrollbar(m); !strings.Contains(sb, "┃") {
+	if sb := scrollbar(tf); !strings.Contains(sb, "┃") {
 		t.Fatalf("scrollbar should show a thumb for wrapped content, got %q", strip(sb))
 	}
 }
@@ -166,7 +168,7 @@ func TestPasteMultiLine(t *testing.T) {
 	if updated.submitted {
 		t.Fatal("paste must NOT trigger submit")
 	}
-	if got := updated.textarea.Value(); got != pastedText {
+	if got := updated.fld.value(); got != pastedText {
 		t.Fatalf("textarea value after paste = %q, want %q", got, pastedText)
 	}
 }
