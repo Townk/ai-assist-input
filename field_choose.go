@@ -351,11 +351,13 @@ func (f *chooseField) view(innerW int, focused bool) string {
 				}
 			}
 
-			boxW := innerW - gutterLen
+			// Reserve one trailing column so the highlight extends a space past
+			// the box's right border (matching the gutter indent on the left).
+			boxW := innerW - gutterLen - 1
 			if boxW < otherBoxMinW {
 				boxW = otherBoxMinW
 			}
-			hlW := gutterLen + boxW
+			hlW := gutterLen + boxW + 1
 			indent := strings.Repeat(" ", gutterLen)
 
 			// Focus-dependent styling:

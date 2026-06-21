@@ -170,8 +170,11 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 	s.Blurred.Base = base
 	s.Focused.Text = textStyle
 	s.Blurred.Text = textStyle
-	s.Focused.CursorLine = base
-	s.Blurred.CursorLine = base
+	// The line under the cursor is drawn with CursorLine, not Text, so it must
+	// carry the same foreground — otherwise the typed text on the active line
+	// loses st.text and renders in an indeterminate default colour.
+	s.Focused.CursorLine = textStyle
+	s.Blurred.CursorLine = textStyle
 	s.Focused.Placeholder = withBg(s.Focused.Placeholder)
 	s.Blurred.Placeholder = withBg(s.Blurred.Placeholder)
 	if st.bg != "" {

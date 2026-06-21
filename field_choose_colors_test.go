@@ -5,7 +5,26 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
+
+// The typed text sits on the textarea's cursor line, which is drawn with the
+// CursorLine style — it must carry the text foreground, not a default colour.
+// Distinct colours isolate the text fg from the icon/border fg.
+func TestTextFieldCursorLineUsesTextFg(t *testing.T) {
+	f := newTextField(defaultTheme(), "hello", "", 2, false)
+	out := f.viewWith(30, taStyle{icon: "#00ff00", border: "#00ff00", text: "#ff0000", bg: "#000088", placeholder: false})
+	const redFg = "38;2;255;0;0"
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(strip(ln), "hello") {
+			if !strings.Contains(ln, redFg) {
+				t.Fatalf("typed text on the cursor line must use the text fg %q: %q", redFg, ln)
+			}
+			return
+		}
+	}
+	t.Fatal("typed text 'hello' not found in render")
+}
 
 // Truecolor ANSI fragments for the default theme.
 const (
@@ -95,6 +114,12 @@ func TestChooseOtherFocusedSelBgBrightWhite(t *testing.T) {
 		if !strings.Contains(lines[start+off], bgSel) {
 			t.Fatalf("focused other line %d must be backed by the selected bg %q: %q",
 				off, bgSel, lines[start+off])
+		}
+		// Each focused line spans the full inner width (40), so the highlight
+		// includes a trailing space past the box's right border.
+		if w := lipgloss.Width(strip(lines[start+off])); w != 40 {
+			t.Fatalf("focused other line %d width = %d, want 40 (trailing space): %q",
+				off, w, strip(lines[start+off]))
 		}
 	}
 }
