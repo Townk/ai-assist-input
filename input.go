@@ -26,6 +26,7 @@ type model struct {
 	theme      Theme
 	variant    string
 	title      string
+	prompt     string
 	singleLine bool
 	width      int
 	taHeight   int
@@ -38,10 +39,10 @@ type model struct {
 // initialModel keeps the original signature the existing tests call (text, 1/1
 // padding/inset, default theme).
 func initialModel(value, title string, height int) model {
-	return newInputModel(defaultTheme(), "default", title, value, "", height, 1, 1, false)
+	return newInputModel(defaultTheme(), "default", title, "", value, "", height, 1, 1, false)
 }
 
-func newInputModel(theme Theme, variant, title, value, placeholder string, height, padding, inset int, singleLine bool) model {
+func newInputModel(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool) model {
 	ta := textarea.New()
 	ta.Placeholder = placeholder
 	ta.ShowLineNumbers = false
@@ -70,7 +71,7 @@ func newInputModel(theme Theme, variant, title, value, placeholder string, heigh
 	ta.SetHeight(height)
 
 	return model{
-		textarea: ta, theme: theme, variant: variant, title: title,
+		textarea: ta, theme: theme, variant: variant, title: title, prompt: prompt,
 		singleLine: singleLine, width: 64, taHeight: height,
 		padding: padding, inset: inset,
 	}
@@ -217,7 +218,12 @@ func (m model) render() string {
 		BorderForeground(lipgloss.Color(m.theme.FieldBorder)).
 		Padding(0, 0, 0, boxPadL).
 		Render(body)
-	return renderFrame(m.theme, m.variant, m.title, []string{box}, m.hint(), m.width, m.padding, m.inset)
+	sections := []string{}
+	if m.prompt != "" {
+		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
+	}
+	sections = append(sections, box)
+	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
 }
 
 func (m model) View() tea.View {
@@ -226,9 +232,9 @@ func (m model) View() tea.View {
 	return v
 }
 
-func runInput(theme Theme, variant, title, value, placeholder string, height, padding, inset int, singleLine bool) {
+func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool) {
 	fm, err := tea.NewProgram(
-		newInputModel(theme, variant, title, value, placeholder, height, padding, inset, singleLine),
+		newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine),
 		tea.WithOutput(os.Stderr),
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()

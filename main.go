@@ -16,11 +16,12 @@ func main() {
 	runewidth.DefaultCondition.EastAsianWidth = false
 
 	fs := flag.NewFlagSet("ai-assist-input", flag.ExitOnError)
-	var typ, title, value, placeholder, variant, affirmative, negative, defaultSide string
+	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide string
 	var height, padding, inset int
 	var danger, warning bool
 	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm")
 	fs.StringVar(&title, "title", "", "modal title")
+	fs.StringVar(&prompt, "prompt", "", "description shown above the input")
 	fs.StringVar(&value, "value", "", "initial value (text|line)")
 	fs.StringVar(&placeholder, "placeholder", "", "placeholder (line)")
 	fs.IntVar(&height, "height", 10, "textarea viewport rows (text)")
@@ -47,12 +48,14 @@ func main() {
 
 	switch typ {
 	case "confirm":
-		prompt := strings.Join(fs.Args(), " ") // prompt passed after `--`
+		if prompt == "" {
+			prompt = strings.Join(fs.Args(), " ") // positional fallback for backward compat
+		}
 		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset)
 	case "line":
-		runInput(*theme, variant, title, value, placeholder, 1, padding, inset, true)
+		runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true)
 	case "text":
-		runInput(*theme, variant, title, value, "", height, padding, inset, false)
+		runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false)
 	default:
 		fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
 		os.Exit(2)

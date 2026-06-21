@@ -44,10 +44,57 @@ func TestRenderLayout(t *testing.T) {
 	}
 }
 
+// TestTextRendersPromptAboveBox verifies that a non-empty --prompt string
+// renders above the input box, inside the frame.
+func TestTextRendersPromptAboveBox(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "Notes", "Describe the issue", "", "", 3, 1, 1, false)
+	m.width = 60
+	m.resize()
+	plain := strip(m.render())
+	if !strings.Contains(plain, "▓▓▓ Notes") {
+		t.Fatal("title missing")
+	}
+	if !strings.Contains(plain, "Describe the issue") {
+		t.Fatal("prompt missing above the input box")
+	}
+	// prompt must appear before the input box top-border (skip outer frame ╭ on line 0)
+	lines := strings.Split(plain, "\n")
+	promptLine, boxLine := -1, -1
+	for i, l := range lines[1:] { // skip outer frame top border
+		if promptLine < 0 && strings.Contains(l, "Describe the issue") {
+			promptLine = i + 1
+		}
+		if boxLine < 0 && strings.Contains(l, "╭") {
+			boxLine = i + 1
+		}
+	}
+	if promptLine < 0 || boxLine < 0 || promptLine >= boxLine {
+		t.Fatalf("prompt (line %d) must be above the input box top-border (line %d)", promptLine, boxLine)
+	}
+}
+
+func TestTextNoPromptRowWhenEmpty(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "Notes", "", "", "", 3, 1, 1, false)
+	m.width = 60
+	m.resize()
+	// the line after the rule should be the box top, not a blank prompt line
+	lines := strings.Split(strip(m.render()), "\n")
+	ruleIdx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "━") {
+			ruleIdx = i
+			break
+		}
+	}
+	if ruleIdx < 0 {
+		t.Fatal("no rule")
+	}
+}
+
 // TestLineHasNoScrollbarOrNewline pins the line variant: single row, no
 // scrollbar, and a hint without the newline affordance.
 func TestLineHasNoScrollbarOrNewline(t *testing.T) {
-	m := newInputModel(defaultTheme(), "default", "Name", "", "type…", 1, 1, 1, true)
+	m := newInputModel(defaultTheme(), "default", "Name", "", "", "type…", 1, 1, 1, true)
 	m.width = 60
 	m.resize()
 	plain := strip(m.render())
