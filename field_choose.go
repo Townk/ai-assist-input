@@ -340,9 +340,20 @@ func (f *chooseField) view(innerW int, focused bool) string {
 			gutterText := " " + otherIndicator + " "
 			gutterBlank := strings.Repeat(" ", gutterLen)
 			boxW := innerW - gutterLen
-			if boxW < 1 {
-				boxW = 1
+			// Floor: the embedded textField is multiline (singleLine=false) so its chrome
+			// is boxBorder + boxPadL + iconCol + scrollGap + scrollCol = 8 columns, plus
+			// at least 1 column for the textarea itself.  Below this floor the textField
+			// renders wider than boxW, which makes hlStyle.Width(innerW).Render() re-wrap
+			// the guttered lines and produce more rows than lines() reports.
+			// At real dialog widths (innerW >= 12) this floor is never hit.
+			const otherBoxMinW = boxBorder + boxPadL + iconCol + scrollGap + scrollCol + 1
+			if boxW < otherBoxMinW {
+				boxW = otherBoxMinW
 			}
+			// hlW: the width to pass to hlStyle.Width() so it does not wrap the guttered
+			// line.  Normally gutterLen + boxW == innerW; when boxW was clamped up we use
+			// the actual rendered width so highlight padding never causes re-wrapping.
+			hlW := gutterLen + boxW
 			// Pass focused=true so the box always renders with its active style;
 			// when the other row is not highlighted we still show the box but
 			// apply gutter in muted style.
@@ -357,8 +368,8 @@ func (f *chooseField) view(innerW int, focused bool) string {
 					line = gutterBlank + bl
 				}
 				if isHL {
-					// Full-item highlight: pad all 4 lines to innerW.
-					guttered = append(guttered, hlStyle.Width(innerW).Render(line))
+					// Full-item highlight: pad all 4 lines to hlW (>= innerW).
+					guttered = append(guttered, hlStyle.Width(hlW).Render(line))
 				} else {
 					guttered = append(guttered, line)
 				}
@@ -381,60 +392,62 @@ func (f *chooseField) view(innerW int, focused bool) string {
 
 // value returns the selected value(s).
 // Single: selected option or typed other text.
-// Multi: \n-joined selected options (+ other text if set).
+// Multi: \n-joined selected options (+ other text if non-empty, regardless of highlight).
 func (f *chooseField) value() string {
-	// When the highlight is on the other row and the embedded field has text,
-	// that text takes part in (or becomes) the value.  When the buffer is EMPTY
-	// we fall through to the normal single/multi logic so that toggled options
-	// are not silently discarded.
-	if f.isOtherRow(f.highlight) && f.otherField != nil {
-		otherVal := f.otherField.value()
-		if otherVal != "" {
-			if f.multi {
-				var parts []string
-				for i, opt := range f.options {
-					if f.toggled[i] {
-						parts = append(parts, opt)
-					}
-				}
-				parts = append(parts, otherVal)
-				return strings.Join(parts, "\n")
-			}
-			return otherVal
-		}
-		// otherVal is empty — fall through to normal single/multi logic below.
-	}
-	if f.multi {
-		var parts []string
-		for i, opt := range f.options {
-			if f.toggled[i] {
-				parts = append(parts, opt)
+	// Single-select: the other row is highlight-driven (only when focused there do
+	// we return the typed text; otherwise the selected option index governs).
+	if !f.multi {
+		if f.isOtherRow(f.highlight) && f.otherField != nil {
+			otherVal := f.otherField.value()
+			if otherVal != "" {
+				return otherVal
 			}
 		}
-		return strings.Join(parts, "\n")
+		if f.selected >= 0 && f.selected < len(f.options) {
+			return f.options[f.selected]
+		}
+		return ""
 	}
-	// Single
-	if f.selected >= 0 && f.selected < len(f.options) {
-		return f.options[f.selected]
+
+	// Multi-select: collect all toggled options, then append non-empty other text
+	// regardless of whether the other row is currently highlighted.  This prevents
+	// typed other text from being silently dropped when the user navigates away.
+	var parts []string
+	for i, opt := range f.options {
+		if f.toggled[i] {
+			parts = append(parts, opt)
+		}
 	}
-	return ""
+	if f.otherField != nil {
+		if otherVal := f.otherField.value(); otherVal != "" {
+			parts = append(parts, otherVal)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // filled returns true if a selection has been made (single) or ≥1 selected (multi).
-// When the other row is highlighted and the in-progress buffer is non-empty, we treat
-// that as filled — otherwise Tab-away from the other field wedges a required form
-// (the form intercepts Tab before the field can commit).
+// For multi mode, a non-empty other-field buffer counts as filled regardless of
+// which row is highlighted — this prevents the typed text from being silently
+// dropped and ensures form required-field validation sees it correctly.
+// For single mode, the other field only counts when it is the highlighted row
+// (highlight-driven semantics are unchanged).
 func (f *chooseField) filled() bool {
-	if f.isOtherRow(f.highlight) && f.otherField != nil && f.otherField.value() != "" {
-		return true
-	}
 	if f.multi {
 		for _, t := range f.toggled {
 			if t {
 				return true
 			}
 		}
+		// Also filled if other text was typed, even when not currently focused.
+		if f.otherField != nil && f.otherField.value() != "" {
+			return true
+		}
 		return false
+	}
+	// Single: other row fills only when highlighted.
+	if f.isOtherRow(f.highlight) && f.otherField != nil && f.otherField.value() != "" {
+		return true
 	}
 	return f.selected >= 0
 }
@@ -445,9 +458,11 @@ func (f *chooseField) filled() bool {
 func (f *chooseField) optionLineCount(i, innerW int) int {
 	if f.isOtherRow(i) {
 		// Static 4-line box: always use otherField.lines() (= taHeight + boxBorder = 4).
+		// Apply the same floor as view() so lines() == view() at narrow widths.
 		boxW := innerW - gutterLen
-		if boxW < 1 {
-			boxW = 1
+		const otherBoxMinW = boxBorder + boxPadL + iconCol + scrollGap + scrollCol
+		if boxW < otherBoxMinW {
+			boxW = otherBoxMinW
 		}
 		return f.otherField.lines(boxW)
 	}

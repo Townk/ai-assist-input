@@ -337,3 +337,42 @@ func TestChooseHintNoNumberRange(t *testing.T) {
 		t.Fatalf("hint must still show move + 󱊷 dismiss: %q", h)
 	}
 }
+
+// Finding A: multi choose with --other; toggle an option, navigate onto the
+// other row, type text, navigate UP off the other row, then submit.
+// value() must include BOTH the toggled option AND the typed other text.
+// filled() must be true throughout (the typed text is not silently dropped).
+func TestChooseMultiOtherTextPreservedAfterNavAway(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, true, "Other…"))
+	// Toggle "a" (highlight=0)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeySpace})
+	// Navigate down twice to land on the other row (index 2)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	// Type "xyz" into the other field
+	for _, r := range "xyz" {
+		f, _, _ = f.handle(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	// Navigate UP off the other row (now highlight=1, not the other row)
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyUp})
+	// value() must include both "a" and "xyz"
+	got := f.value()
+	if !strings.Contains(got, "a") || !strings.Contains(got, "xyz") {
+		t.Fatalf("value() must contain both toggled option and typed other text after nav away: %q", got)
+	}
+	if !f.filled() {
+		t.Fatal("filled() must be true when other text was typed even after nav away")
+	}
+}
+
+// Finding B: lines() and view() must agree at both narrow (<=11) and normal (>=12) innerW
+// when the other row is focused.
+func TestChooseLinesMatchViewOtherNarrowWidth(t *testing.T) {
+	// innerW=8 is in the <=11 divergence range — before fix, lines() < view() row count.
+	f := field(newChooseField(defaultTheme(), "default", []string{"a"}, false, "Other…"))
+	// Navigate to the other row so it's focused (highlighted).
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	linesMatchView(t, f, 8, "other-focused narrow (innerW=8)")
+	// Normal width must still agree.
+	linesMatchView(t, f, 24, "other-focused normal (innerW=24)")
+}
