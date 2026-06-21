@@ -172,3 +172,18 @@ func TestPasteMultiLine(t *testing.T) {
 		t.Fatalf("textarea value after paste = %q, want %q", got, pastedText)
 	}
 }
+
+// TestTextUsesChevronIcon verifies that the rendered text input contains ❯
+// and not the old brain glyph.
+func TestTextUsesChevronIcon(t *testing.T) {
+	m := initialModel("hi", "ai-assist", 3)
+	m.width = 60
+	m.resize()
+	out := strip(m.render())
+	if !strings.Contains(out, "❯") {
+		t.Fatalf("text input must use the ❯ prompt icon: %q", out)
+	}
+	if strings.Contains(out, "󰧑") {
+		t.Fatal("old brain icon must be gone")
+	}
+}

@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-const promptIcon = "󰧑"
+const promptIcon = "❯"
 
 const (
 	boxBorder = 2 // inner rounded box, left + right
