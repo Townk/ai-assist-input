@@ -149,15 +149,15 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 	return f, fieldNone, nil
 }
 
-// view renders the list rows with optional windowed scroll.
-// innerW is the width available inside the outer frame.
-func (f *chooseField) view(innerW int, focused bool) string {
+// windowBounds returns the viewport slice [start, end) for the visible window,
+// and whether up/down scroll indicators should be shown.
+// This is the single source of truth used by both view() and lines().
+func (f *chooseField) windowBounds() (viewStart, viewEnd int, showUp, showDown bool) {
 	total := f.totalRows()
 	maxVis := maxVisibleRows
 
-	// Compute viewport window.
-	viewStart := 0
-	viewEnd := total
+	viewStart = 0
+	viewEnd = total
 	if total > maxVis {
 		viewStart = f.highlight - maxVis/2
 		if viewStart < 0 {
@@ -171,7 +171,16 @@ func (f *chooseField) view(innerW int, focused bool) string {
 				viewStart = 0
 			}
 		}
+		showUp = viewStart > 0
+		showDown = viewEnd < total
 	}
+	return
+}
+
+// view renders the list rows with optional windowed scroll.
+// innerW is the width available inside the outer frame.
+func (f *chooseField) view(innerW int, focused bool) string {
+	viewStart, viewEnd, showUp, showDown := f.windowBounds()
 
 	selBg, selFg := f.theme.ButtonSelBg, f.theme.ButtonSelFg
 	switch f.variant {
@@ -195,7 +204,7 @@ func (f *chooseField) view(innerW int, focused bool) string {
 	var rows []string
 
 	// Scroll indicator at top if clipped.
-	if total > maxVis && viewStart > 0 {
+	if showUp {
 		rows = append(rows, mutedStyle.Render("  ↑ more"))
 	}
 
@@ -252,7 +261,7 @@ func (f *chooseField) view(innerW int, focused bool) string {
 	}
 
 	// Scroll indicator at bottom if clipped.
-	if total > maxVis && viewEnd < total {
+	if showDown {
 		rows = append(rows, mutedStyle.Render("  ↓ more"))
 	}
 
@@ -304,16 +313,17 @@ func (f *chooseField) filled() bool {
 }
 
 // lines returns the rendered height of this field.
+// It mirrors the row count that view() emits: window rows + indicator rows.
 func (f *chooseField) lines(innerW int) int {
-	total := f.totalRows()
-	vis := total
-	if vis > maxVisibleRows {
-		vis = maxVisibleRows
+	viewStart, viewEnd, showUp, showDown := f.windowBounds()
+	count := viewEnd - viewStart
+	if showUp {
+		count++
 	}
-	if f.otherActive {
-		vis++
+	if showDown {
+		count++
 	}
-	return vis
+	return count
 }
 
 // initCmd returns nil — the choose field needs no cursor blink.

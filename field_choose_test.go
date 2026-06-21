@@ -73,3 +73,38 @@ func TestChooseEscCancel(t *testing.T) {
 		t.Fatal("Esc must cancel")
 	}
 }
+
+// linesMatchView asserts that lines(innerW) equals the number of lines
+// strip(view(innerW, true)) actually produces.
+func linesMatchView(t *testing.T, f field, innerW int, label string) {
+	t.Helper()
+	rendered := strip(f.view(innerW, true))
+	// count non-empty lines (view never emits trailing newlines, but be safe)
+	viewLines := len(strings.Split(rendered, "\n"))
+	got := f.lines(innerW)
+	if got != viewLines {
+		t.Errorf("%s: lines(%d)=%d but view renders %d lines\nrendered:\n%s",
+			label, innerW, got, viewLines, rendered)
+	}
+}
+
+func TestChooseLinesMatchViewShort(t *testing.T) {
+	// Short list (≤ cap): no scroll indicators expected.
+	opts := []string{"alpha", "beta", "gamma"}
+	f := field(newChooseField(defaultTheme(), "default", opts, false, ""))
+	linesMatchView(t, f, 40, "short list (3 options)")
+}
+
+func TestChooseLinesMatchViewLong(t *testing.T) {
+	// Long list (> cap = 8): scroll indicators must be counted.
+	opts := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
+	f := field(newChooseField(defaultTheme(), "default", opts, false, ""))
+	// Highlight is at 0, so viewStart=0 → no up-indicator; viewEnd=8 < 10 → down-indicator present.
+	linesMatchView(t, f, 40, "long list (10 options, highlight=0)")
+
+	// Move highlight to the middle so both indicators appear.
+	for i := 0; i < 5; i++ {
+		f, _, _ = f.handle(key('j'))
+	}
+	linesMatchView(t, f, 40, "long list (10 options, highlight=5, both indicators)")
+}
