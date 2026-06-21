@@ -24,11 +24,14 @@ func renderFrame(t Theme, variant, title string, body []string, hint string, wid
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.titleColor(variant)))
 	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Rule))
 
-	rows := []string{
-		titleStyle.Render("▓▓▓ " + title),
-		ruleStyle.Render(strings.Repeat("━", innerW)),
+	var rows []string
+	if title != "" {
+		rows = append(rows,
+			titleStyle.Render("▓▓▓ "+title),
+			ruleStyle.Render(strings.Repeat("━", innerW)),
+		)
+		rows = appendBlanks(rows, inset)
 	}
-	rows = appendBlanks(rows, inset)
 	for i, sec := range body {
 		if i > 0 {
 			rows = appendBlanks(rows, inset)

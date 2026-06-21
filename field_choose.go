@@ -300,7 +300,13 @@ func (f *chooseField) value() string {
 }
 
 // filled returns true if a selection has been made (single) or ≥1 selected (multi).
+// When the free-text "other" entry is active, we also treat a non-empty in-progress
+// buffer as filled — otherwise Tab-away from the other field wedges a required form
+// (the form interceptsTab before the field can commit, so otherText never gets set).
 func (f *chooseField) filled() bool {
+	if f.otherActive && f.otherField != nil && f.otherField.value() != "" {
+		return true
+	}
 	if f.multi {
 		for _, t := range f.toggled {
 			if t {
@@ -314,6 +320,9 @@ func (f *chooseField) filled() bool {
 
 // lines returns the rendered height of this field.
 // It mirrors the row count that view() emits: window rows + indicator rows.
+// When the "other" free-text entry is active, its embedded textField renders as
+// multiple physical lines (border + textarea height), so we substitute its line
+// count for the single slot the other row would otherwise occupy.
 func (f *chooseField) lines(innerW int) int {
 	viewStart, viewEnd, showUp, showDown := f.windowBounds()
 	count := viewEnd - viewStart
@@ -322,6 +331,14 @@ func (f *chooseField) lines(innerW int) int {
 	}
 	if showDown {
 		count++
+	}
+	// If the "other" row is in the visible window and the embedded textField is
+	// active, that row renders as otherField.lines() physical lines instead of 1.
+	if f.otherActive && f.otherField != nil {
+		otherIdx := len(f.options) // index of the "other" row in the full list
+		if otherIdx >= viewStart && otherIdx < viewEnd {
+			count += f.otherField.lines(innerW-4) - 1
+		}
 	}
 	return count
 }

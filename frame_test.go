@@ -34,6 +34,36 @@ func TestRenderFrameWidth(t *testing.T) {
 	}
 }
 
+func TestRenderFrameEmptyTitle(t *testing.T) {
+	// Empty title → no ▓▓▓ header and no ━ rule; body must still render.
+	out := renderFrame(defaultTheme(), "default", "", []string{"Body only"}, "hint", 40, 1, 1)
+	plain := strip(out)
+	if strings.Contains(plain, "▓▓▓") {
+		t.Fatal("empty title must not render the ▓▓▓ header")
+	}
+	if strings.Contains(plain, "━") {
+		t.Fatal("empty title must not render the ━ rule")
+	}
+	if !strings.Contains(plain, "Body only") {
+		t.Fatal("body must still render when title is empty")
+	}
+	if !strings.Contains(plain, "hint") {
+		t.Fatal("hint must still render when title is empty")
+	}
+}
+
+func TestRenderFrameNonEmptyTitleHasBoth(t *testing.T) {
+	// Non-empty title → both ▓▓▓ header and ━ rule present.
+	out := renderFrame(defaultTheme(), "default", "My Header", []string{"Body"}, "hint", 40, 1, 1)
+	plain := strip(out)
+	if !strings.Contains(plain, "▓▓▓ My Header") {
+		t.Fatal("non-empty title must render ▓▓▓ header")
+	}
+	if !strings.Contains(plain, "━") {
+		t.Fatal("non-empty title must render ━ rule")
+	}
+}
+
 func TestRenderFramePaddingRows(t *testing.T) {
 	// padding=2 adds two blank rows just inside the top and bottom borders.
 	// Each blank padding row must still be enclosed by the continuous border:

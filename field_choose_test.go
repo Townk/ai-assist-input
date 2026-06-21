@@ -108,3 +108,29 @@ func TestChooseLinesMatchViewLong(t *testing.T) {
 	}
 	linesMatchView(t, f, 40, "long list (10 options, highlight=5, both indicators)")
 }
+
+func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
+	// Activate other, type text, do NOT press Enter → value() is non-empty and filled() is true.
+	// This covers the Tab-away-wedges-form bug: the form intercepts Tab before the field
+	// commits, so otherText never gets set; filled() must look at the in-progress buffer.
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
+	f, _, _ = f.handle(key('3')) // navigate to "other" and activate text mode
+	for _, r := range "typed" {
+		f, _, _ = f.handle(key(r))
+	}
+	// Do NOT send Enter — simulate Tab-away scenario.
+	if f.value() == "" {
+		t.Fatal("value() must return the in-progress buffer when other is active")
+	}
+	if !f.filled() {
+		t.Fatal("filled() must return true when other is active with non-empty buffer")
+	}
+}
+
+func TestChooseLinesMatchViewOtherActive(t *testing.T) {
+	// When the "other" free-text entry is active, the embedded textField renders as
+	// multiple physical lines; lines() must match the actual view() row count.
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
+	f, _, _ = f.handle(key('3')) // activate other text mode
+	linesMatchView(t, f, 40, "other-active (embedded textField rows must match lines())")
+}
