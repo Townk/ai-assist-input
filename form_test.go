@@ -50,14 +50,14 @@ func TestFormRequiredNoEarlySubmit(t *testing.T) {
 
 func TestFormRendersTabRowAndActiveFieldNoNestedTitle(t *testing.T) {
 	m := newFormModel(defaultTheme(), "Setup", []formField{
-		{"a", "line", "First", ""}, {"b", "confirm", "Agree?", ""},
+		{"a", "line", "First", ""}, {"b", "choose", "Options", "yes\x1dno"},
 	}, 1, 1)
 	m.width = 50
 	out := strip(m.render())
 	if !strings.Contains(out, "▓▓▓ Setup") {
 		t.Fatal("main title missing")
 	}
-	if !strings.Contains(out, "First") || !strings.Contains(out, "Agree?") {
+	if !strings.Contains(out, "First") || !strings.Contains(out, "Options") {
 		t.Fatal("tab row labels missing")
 	}
 	if strings.Count(out, "▓▓▓") != 1 {
@@ -69,5 +69,39 @@ func TestFormOutputProtocol(t *testing.T) {
 	answers := []string{"a" + us + "Alice", "b" + us + "yes"}
 	if got := strings.Join(answers, rs); got != "a"+us+"Alice"+rs+"b"+us+"yes" {
 		t.Fatal("output join")
+	}
+}
+
+func TestFormRejectsConfirmType(t *testing.T) {
+	_, err := parseFormSpec("a" + us + "line" + us + "A" + us + "" + rs + "b" + us + "confirm" + us + "B" + us + "")
+	if err == nil {
+		t.Fatal("a confirm field type must be rejected (forms support line/text/choose only)")
+	}
+}
+
+func TestFormShowsActiveFieldLabelAsDescription(t *testing.T) {
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"name", "line", "Your full name", ""}, {"city", "line", "City", ""},
+	}, 1, 1)
+	m.width = 50
+	out := strip(m.render())
+	// the active field's label renders as a description line above its input
+	if !strings.Contains(out, "Your full name") {
+		t.Fatal("active field label must render as a description above the input")
+	}
+}
+
+func TestFormArrowKeysMoveFields(t *testing.T) {
+	// Use choose fields: Left/Right navigate fields for choose (not text cursor).
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"a", "choose", "A", "x\x1dy"}, {"b", "choose", "B", "x\x1dy"},
+	}, 1, 1)
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m2.(formModel).focus != 1 {
+		t.Fatal("Right arrow moves to the next field")
+	}
+	m3, _ := m2.(formModel).Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m3.(formModel).focus != 0 {
+		t.Fatal("Left arrow moves to the previous field")
 	}
 }

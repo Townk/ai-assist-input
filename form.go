@@ -13,7 +13,7 @@ import (
 // formField is a parsed entry from the US/RS form spec.
 type formField struct {
 	name  string
-	ftype string // "line" | "text" | "confirm" | "choose"
+	ftype string // "line" | "text" | "choose"
 	label string
 	param string
 }
@@ -56,6 +56,13 @@ func parseFormSpec(raw string) ([]formField, error) {
 		if ff.label == "" {
 			ff.label = ff.name
 		}
+		// Validate field type: only line/text/choose are supported.
+		switch ff.ftype {
+		case "line", "text", "choose":
+			// valid
+		default:
+			return nil, fmt.Errorf("form: field %q has unsupported type %q (use line, text, or choose)", ff.name, ff.ftype)
+		}
 		fields[i] = ff
 	}
 	return fields, nil
@@ -76,13 +83,12 @@ type formModel struct {
 }
 
 // buildField constructs a field implementation from a formField spec.
+// Supported types: "line", "text", "choose". Callers must validate the type
+// before calling (parseFormSpec does this).
 func buildField(theme Theme, ff formField) field {
 	switch ff.ftype {
 	case "text":
 		return newTextField(theme, "", "", 4, false)
-	case "confirm":
-		defaultNeg := ff.param == "no"
-		return newConfirmField(theme, "default", "Yes", "No", defaultNeg)
 	case "choose":
 		param := ff.param
 		multi := false
@@ -109,7 +115,7 @@ func buildField(theme Theme, ff formField) field {
 			options = strings.Split(param, "\x1d")
 		}
 		return newChooseField(theme, "default", options, multi, other)
-	default: // "line" and anything unknown
+	default: // "line" and any unknown fallback
 		return newTextField(theme, "", "", 1, true)
 	}
 }
@@ -177,7 +183,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Tab / Shift+Tab: free-tab navigation.
+		// Tab / Shift+Tab: free-tab navigation (all field types).
 		if msg.Code == tea.KeyTab && !msg.Mod.Contains(tea.ModShift) {
 			n := len(m.fields)
 			m.focus = (m.focus + 1) % n
@@ -187,6 +193,21 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			n := len(m.fields)
 			m.focus = (m.focus - 1 + n) % n
 			return m, m.fields[m.focus].initCmd()
+		}
+
+		// Right / Left arrow: field navigation only for choose fields.
+		// For line/text fields, ←/→ move the text cursor (pass through below).
+		if m.specs[m.focus].ftype == "choose" {
+			if msg.Code == tea.KeyRight {
+				n := len(m.fields)
+				m.focus = (m.focus + 1) % n
+				return m, m.fields[m.focus].initCmd()
+			}
+			if msg.Code == tea.KeyLeft {
+				n := len(m.fields)
+				m.focus = (m.focus - 1 + n) % n
+				return m, m.fields[m.focus].initCmd()
+			}
 		}
 
 		// Delegate to focused field.
@@ -253,8 +274,11 @@ func (m formModel) hint() string {
 
 func (m formModel) render() string {
 	iW := m.innerW()
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text))
+	desc := descStyle.Render(m.specs[m.focus].label)
 	body := []string{
 		m.tabRow(),
+		desc,
 		m.fields[m.focus].view(iW, true),
 	}
 	return renderFrame(m.theme, "default", m.title, body, m.hint(), m.width, m.padding, m.inset)
