@@ -20,10 +20,11 @@ func TestChooseSingleSelect(t *testing.T) {
 }
 
 func TestChooseNumberShortcut(t *testing.T) {
+	// Number shortcuts are removed — pressing a digit must NOT select/jump.
 	f := field(newChooseField(defaultTheme(), "default", []string{"alpha", "beta", "gamma"}, false, ""))
-	f2, act, _ := f.handle(key('3'))
-	if act != fieldDone || f2.value() != "gamma" {
-		t.Fatalf("3 must select gamma: act=%d val=%q", act, f2.value())
+	_, act, _ := f.handle(key('3'))
+	if act == fieldDone {
+		t.Fatalf("number keys must no longer select (act=%d)", act)
 	}
 }
 
@@ -48,8 +49,9 @@ func TestChooseRendersListNoFuzzy(t *testing.T) {
 	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
 		t.Fatal("options must render")
 	}
-	if !strings.Contains(out, "1") || !strings.Contains(out, "2") {
-		t.Fatal("number shortcuts must render")
+	// Number prefixes are gone; radio indicators must appear instead.
+	if !strings.Contains(out, "󰄵") && !strings.Contains(out, "󰄱") {
+		t.Fatal("rows must show radio indicators (󰄵 or 󰄱)")
 	}
 }
 
@@ -173,10 +175,13 @@ func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
 	// highlight is row 0 by default
 	out := strip(f.view(30, true))
 	first := strings.Split(out, "\n")[0]
-	// 1 leading space before the number, 1 trailing space after the label, and
-	// the highlighted row is padded to the inner width (full-width bar).
-	if !strings.HasPrefix(first, " 1 alpha") {
-		t.Fatalf("row must be ' <n> <label>' with a leading space: %q", first)
+	// Layout is now " <indicator> <label> " — leading space + indicator glyph + space.
+	// The highlighted row must contain the label and be padded to the inner width.
+	if !strings.Contains(first, "alpha") {
+		t.Fatalf("row must contain the label 'alpha': %q", first)
+	}
+	if !strings.HasPrefix(first, " ") {
+		t.Fatalf("row must start with a leading space: %q", first)
 	}
 	if lipgloss.Width(first) < 28 {
 		t.Fatalf("highlighted row must span ~inner width, got width %d: %q", lipgloss.Width(first), first)
@@ -264,13 +269,68 @@ func TestChooseOtherMaxLinesAccountsForExpandedRow(t *testing.T) {
 func TestChooseHintRangeAndEscGlyph(t *testing.T) {
 	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/)
 	plain := strip(h)
-	if !strings.Contains(plain, "1-3") {
-		t.Fatalf("hint must show the number range 1-3: %q", plain)
+	// Number range is gone.
+	if strings.Contains(plain, "1-3") || strings.Contains(plain, "pick") {
+		t.Fatalf("hint must not mention a number range/pick: %q", plain)
+	}
+	// Must still have move and dismiss glyph.
+	if !strings.Contains(plain, "move") {
+		t.Fatalf("hint must still show 'move': %q", plain)
 	}
 	if !strings.Contains(plain, "󱊷") {
 		t.Fatalf("hint must use the 󱊷 ESC glyph: %q", plain)
 	}
 	if strings.Contains(plain, "⎋") {
 		t.Fatalf("hint must not use the ⎋ glyph: %q", plain)
+	}
+}
+
+func TestChooseSingleShowsRadio(t *testing.T) {
+	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
+	// highlight is row 0; single-select radio: checked on highlighted row, empty elsewhere
+	out := strip(f.view(30, true))
+	lines := strings.Split(out, "\n")
+	if !strings.Contains(lines[0], "󰄵") { // checked radio on the highlighted row
+		t.Fatalf("highlighted single row must show the checked radio 󰄵: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "󰄱") { // empty radio on the other row
+		t.Fatalf("non-highlighted single row must show the empty radio 󰄱: %q", lines[1])
+	}
+}
+
+func TestChooseMultiShowsAndTogglesCheckbox(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, true, ""))
+	// initially all empty checkboxes
+	if !strings.Contains(strip(f.view(30, true)), "󰄰") {
+		t.Fatal("multi rows must show the empty checkbox 󰄰")
+	}
+	// space toggles the highlighted row → checked checkbox visible
+	f2, _, _ := f.handle(tea.KeyPressMsg{Code: ' ', Text: " "})
+	if !strings.Contains(strip(f2.view(30, true)), "󰄳") {
+		t.Fatalf("after toggling, a checked checkbox 󰄳 must be visible: %q", strip(f2.view(30, true)))
+	}
+}
+
+func TestChooseNoNumberShortcuts(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, false, ""))
+	// pressing "2" must NOT select/jump (numbers are gone) — value stays unset, no fieldDone
+	_, act, _ := f.handle(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if act == fieldDone {
+		t.Fatal("number keys must no longer select")
+	}
+	// the rendered rows must not contain a digit prefix
+	out := strip(f.view(30, true))
+	if strings.Contains(out, "1 ") || strings.Contains(out, "2 ") {
+		t.Fatalf("rows must not show number prefixes: %q", out)
+	}
+}
+
+func TestChooseHintNoNumberRange(t *testing.T) {
+	h := strip(chooseHint(defaultTheme(), 3, false))
+	if strings.Contains(h, "1-3") || strings.Contains(h, "pick") {
+		t.Fatalf("hint must not mention a number range/pick: %q", h)
+	}
+	if !strings.Contains(h, "move") || !strings.Contains(h, "󱊷") {
+		t.Fatalf("hint must still show move + 󱊷 dismiss: %q", h)
 	}
 }

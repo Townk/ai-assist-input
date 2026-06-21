@@ -1,17 +1,28 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
+// Indicator glyphs (Nerd Font, each 1 cell wide).
+const (
+	radioChecked    = "󰄵" // U+F0135 — selected single-choice row
+	radioEmpty      = "󰄱" // U+F0131 — unselected single-choice row
+	checkboxChecked = "󰄳" // U+F0133 — checked multi-choice row
+	checkboxEmpty   = "󰄰" // U+F0130 — unchecked multi-choice row
+
+	// gutterLen is the number of terminal columns used by the fixed gutter
+	// that precedes every option label: " <indicator> " = 3 cells.
+	gutterLen = 3
+)
+
 const maxVisibleRows = 8
 
 // chooseField implements the field interface for a themed list (no fuzzy).
-// It supports single- and multi-select, 1–9 shortcuts, windowed scroll, and
+// It supports single- and multi-select, windowed scroll, and
 // an optional free-text "other" entry at the end.
 type chooseField struct {
 	theme      Theme
@@ -138,27 +149,6 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 		}
 		return &c, fieldNone, nil
 
-	case kp.Code >= '1' && kp.Code <= '9':
-		n := int(kp.Code-'0') - 1 // zero-based index
-		if n >= total {
-			return f, fieldNone, nil
-		}
-		c.highlight = n
-		if c.isOtherRow(n) {
-			// Focus the other row (focus-to-type; lazily init the field).
-			if c.otherField == nil {
-				c.otherField = newTextField(c.theme, "", c.otherLabel, 1, false)
-			}
-			return &c, fieldNone, nil
-		}
-		if c.multi {
-			c.toggled[n] = !c.toggled[n]
-			return &c, fieldNone, nil
-		}
-		// Single: select and done.
-		c.selected = n
-		return &c, fieldDone, nil
-
 	case (kp.Code == tea.KeySpace || kp.Code == ' ') && c.multi:
 		if !c.isOtherRow(c.highlight) {
 			c.toggled[c.highlight] = !c.toggled[c.highlight]
@@ -222,92 +212,73 @@ func wrapLabel(labelText string, colW int) []string {
 //
 // Layout per first visual line:
 //
-//	" " + num + " " + [marker] + text
+//	" " + <indicator> + " " + text
 //
-// where the trailing " " is included in the padded width for highlighted rows.
-// Continuation lines are indented to align under the label text (past the
-// " num " prefix and, for multi mode, past the "● " / "○ " marker).
+// The gutter is always exactly gutterLen (3) terminal columns:
+// 1 leading space + 1 indicator glyph + 1 trailing space.
+// Continuation lines are indented gutterLen spaces to align under the label.
+// Highlighted rows are padded to innerW with the highlight background.
 func (f *chooseField) renderOptionRow(
 	i, innerW int,
 	isHL bool,
 	hlStyle, normStyle, mutedStyle, markerSelStyle lipgloss.Style,
 ) []string {
-	num := fmt.Sprintf("%d", i+1)
-	// Prefix: " " + num + " "  (e.g., " 1 " = 3 chars for single-digit)
-	prefixLen := 1 + len(num) + 1
-	// Trailing space is accounted for in innerW padding for highlights, or
-	// appended to non-highlighted lines.
-	trailingLen := 1
-
 	opt := f.options[i]
 
-	// Marker for multi-select (2 visible chars: "● " or "○ ").
-	const markerLen = 2
-	var markerPlain string // plain-text version for width calculation
+	// Choose indicator glyph.
+	var indicator string
 	if f.multi {
 		if f.toggled[i] {
-			markerPlain = "● "
+			indicator = checkboxChecked
 		} else {
-			markerPlain = "○ "
+			indicator = checkboxEmpty
+		}
+	} else {
+		if isHL {
+			indicator = radioChecked
+		} else {
+			indicator = radioEmpty
 		}
 	}
 
-	// Width available for the label text (including marker).
-	labelColW := innerW - prefixLen - trailingLen
-	if labelColW < 1 {
-		labelColW = 1
-	}
-	// Width available for the option text itself (after marker).
-	textColW := labelColW
-	if f.multi {
-		textColW = labelColW - markerLen
-		if textColW < 1 {
-			textColW = 1
-		}
+	// Width available for the label text.
+	textColW := innerW - gutterLen
+	if textColW < 1 {
+		textColW = 1
 	}
 
-	// Wrap the option text into textColW-wide chunks.
+	// Wrap the option text.
 	textLines := wrapLabel(opt, textColW)
 
-	// Indentation for continuation lines (aligns under label text after marker).
-	contIndent := strings.Repeat(" ", prefixLen+len(markerPlain))
-
-	prefix := " " + num + " "
+	// Continuation indent: gutterLen spaces.
+	contIndent := strings.Repeat(" ", gutterLen)
 
 	var resultLines []string
 	for li, tl := range textLines {
 		var lineText string
 		if li == 0 {
-			// First visual line: prefix + marker + text.
-			lineText = prefix + markerPlain + tl
+			lineText = " " + indicator + " " + tl
 		} else {
-			// Continuation: indented to label-text column.
 			lineText = contIndent + tl
 		}
 
 		if isHL {
-			// Pad each line to innerW with the highlight background.
-			styled := hlStyle.Width(innerW).Render(lineText)
-			resultLines = append(resultLines, styled)
+			// Pad the whole line to innerW with the highlight background.
+			resultLines = append(resultLines, hlStyle.Width(innerW).Render(lineText))
 		} else {
-			// Non-highlighted: no padding, just colour.
 			if li == 0 {
-				numStyled := mutedStyle.Render(prefix)
-				if f.multi {
-					var markerStyled string
-					if f.toggled[i] {
-						markerStyled = markerSelStyle.Render("●") + " "
-					} else {
-						markerStyled = mutedStyle.Render("○") + " "
-					}
-					resultLines = append(resultLines, numStyled+markerStyled+normStyle.Render(tl))
+				// Style the indicator distinctly; label in normal text colour.
+				var indStyled string
+				if f.multi && f.toggled[i] {
+					indStyled = markerSelStyle.Render(indicator)
 				} else {
-					resultLines = append(resultLines, numStyled+normStyle.Render(tl))
+					indStyled = mutedStyle.Render(indicator)
 				}
+				resultLines = append(resultLines,
+					mutedStyle.Render(" ")+indStyled+mutedStyle.Render(" ")+normStyle.Render(tl))
 			} else {
 				resultLines = append(resultLines, normStyle.Render(lineText))
 			}
-			continue
 		}
 	}
 	return resultLines
@@ -345,17 +316,32 @@ func (f *chooseField) view(innerW int, focused bool) string {
 	}
 
 	for i := viewStart; i < viewEnd; i++ {
-		num := fmt.Sprintf("%d", i+1)
 		isHL := focused && i == f.highlight
 
 		if f.isOtherRow(i) {
+			// The "other" row uses the same gutterLen gutter as option rows.
+			// Indicator: single → checked radio when highlighted; multi → checked
+			// checkbox when the other field has text (Task 3 will refine this further).
+			var otherIndicator string
+			if f.multi {
+				hasText := f.otherField != nil && f.otherField.value() != ""
+				if hasText {
+					otherIndicator = checkboxChecked
+				} else {
+					otherIndicator = checkboxEmpty
+				}
+			} else {
+				if isHL {
+					otherIndicator = radioChecked
+				} else {
+					otherIndicator = radioEmpty
+				}
+			}
 			if isHL && f.otherField != nil {
 				// Render inline text field with aligned gutter.
-				// The number gutter (" N ") is prefixed on the box's FIRST line;
-				// continuation lines get equal-width spaces so the box's left
-				// border stays vertically consistent.
-				gutterText := " " + num + " "
-				gutterLen := 1 + len(num) + 1
+				// The gutter (" <indicator> ") is prefixed on the FIRST line;
+				// continuation lines get gutterLen spaces so the box border aligns.
+				gutterText := " " + otherIndicator + " "
 				gutterBlank := strings.Repeat(" ", gutterLen)
 				boxW := innerW - gutterLen
 				if boxW < 1 {
@@ -373,7 +359,7 @@ func (f *chooseField) view(innerW int, focused bool) string {
 				}
 				rows = append(rows, guttered...)
 			} else {
-				label := fmt.Sprintf(" %s %s ", num, f.otherLabel)
+				label := " " + otherIndicator + " " + f.otherLabel + " "
 				if isHL {
 					rows = append(rows, hlStyle.Width(innerW).Render(label))
 				} else {
@@ -463,19 +449,12 @@ func (f *chooseField) optionLineCount(i, innerW int) int {
 	if f.isOtherRow(i) {
 		return 1
 	}
-	num := fmt.Sprintf("%d", i+1)
-	prefixLen := 1 + len(num) + 1
-	trailingLen := 1
-	const markerLen = 2
-	textColW := innerW - prefixLen - trailingLen
-	if f.multi {
-		textColW -= markerLen
-	}
+	textColW := innerW - gutterLen
 	if textColW < 1 {
 		textColW = 1
 	}
-	lines := wrapLabel(f.options[i], textColW)
-	return len(lines)
+	ls := wrapLabel(f.options[i], textColW)
+	return len(ls)
 }
 
 // lines returns the rendered height of this field.
@@ -488,9 +467,7 @@ func (f *chooseField) lines(innerW int) int {
 	count := 0
 	for i := viewStart; i < viewEnd; i++ {
 		if f.isOtherRow(i) && f.isOtherRow(f.highlight) && f.otherField != nil {
-			// The gutter takes `1 + len(num) + 1` chars; pass remaining width to the box.
-			num := fmt.Sprintf("%d", i+1)
-			gutterLen := 1 + len(num) + 1
+			// The gutter takes gutterLen chars; pass remaining width to the box.
 			boxW := innerW - gutterLen
 			if boxW < 1 {
 				boxW = 1

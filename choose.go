@@ -76,7 +76,7 @@ func (m chooseModel) innerW() int {
 // chooseHint builds the keyboard-hint line for a choose dialog.
 // Only key glyphs are rendered in theme.Key (bright white); separators,
 // dashes, and descriptive words are in theme.Muted (dark grey).
-// rows is the total number of selectable rows; it caps the shortcut range at 9.
+// rows is kept for API compatibility but is no longer used.
 func chooseHint(t Theme, rows int, multi bool) string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Key))
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Muted))
@@ -86,19 +86,7 @@ func chooseHint(t Theme, rows int, multi bool) string {
 	// Move segment: ↑↓ / jk move
 	move := seg("↑↓", "") + mutedStyle.Render("/") + seg("jk", " move")
 
-	// Pick segment: 1-N pick (or just 1 pick when only 1 row)
-	var pick string
-	n := rows
-	if n > 9 {
-		n = 9
-	}
-	if n <= 1 {
-		pick = seg("1", " pick")
-	} else {
-		pick = keyStyle.Render("1") + mutedStyle.Render("-") + keyStyle.Render(fmt.Sprintf("%d", n)) + mutedStyle.Render(" pick")
-	}
-
-	segs := []string{move, pick}
+	segs := []string{move}
 
 	if multi {
 		segs = append(segs, seg("space", " toggle"))
