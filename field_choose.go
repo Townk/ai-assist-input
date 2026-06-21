@@ -509,5 +509,25 @@ func (f *chooseField) lines(innerW int) int {
 	return count
 }
 
+// maxLines returns the worst-case rendered height of this field at the given
+// innerW. When the choose has an "other" row, that row expands to show an
+// embedded textField box (border + textarea row) when highlighted; the
+// collapsed 1-line placeholder underestimates the pane size needed. This
+// method computes the height as if the other row is focused/expanded so that
+// --measure reports a height that fits every navigable state.
+func (f *chooseField) maxLines(innerW int) int {
+	if f.otherLabel == "" {
+		return f.lines(innerW)
+	}
+	// Build a temporary copy with the highlight on the other row so that the
+	// embedded textField is lazily initialised and the expanded render is used.
+	tmp := *f
+	tmp.highlight = tmp.totalRows() - 1 // other row is always last
+	if tmp.otherField == nil {
+		tmp.otherField = newTextField(tmp.theme, "", tmp.otherLabel, 1, false)
+	}
+	return tmp.lines(innerW)
+}
+
 // initCmd returns nil — the choose field needs no cursor blink.
 func (f *chooseField) initCmd() tea.Cmd { return nil }

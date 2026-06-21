@@ -105,3 +105,50 @@ func TestFormArrowKeysMoveFields(t *testing.T) {
 		t.Fatal("Left arrow moves to the previous field")
 	}
 }
+
+// C1: maxHeight must equal the height rendered with the tallest field active.
+// A form with [line "A", text "B"] — the text field renders taller (textarea
+// rows + inner box border), so focus=1 is taller than focus=0.
+func TestFormMaxHeightIsTallestField(t *testing.T) {
+	const w = 64
+	m := newFormModel(defaultTheme(), "T", []formField{
+		{"a", "line", "A", ""},
+		{"b", "text", "B", ""},
+	}, 1, 1)
+	m.width = w
+
+	// Render with focus=0 (line field).
+	h0 := measureHeight(m.render())
+
+	// Render with focus=1 (text field — should be taller).
+	m.focus = 1
+	h1 := measureHeight(m.render())
+
+	if h1 <= h0 {
+		t.Fatalf("text field (focus=1) must render taller than line field (focus=0): h0=%d h1=%d", h0, h1)
+	}
+
+	// maxHeight must equal h1 (the worst-case tallest field), not h0.
+	got := m.maxHeight(w)
+	if got != h1 {
+		t.Fatalf("maxHeight(%d)=%d want %d (height when focus=1/text field is active)", w, got, h1)
+	}
+	if got <= h0 {
+		t.Fatalf("maxHeight(%d)=%d must be > height when focus=0 (%d)", w, got, h0)
+	}
+}
+
+// I2: the form hint must use the 󱊷 glyph, not ⎋.
+func TestFormHintUsesNewEscGlyph(t *testing.T) {
+	m := newFormModel(defaultTheme(), "T", []formField{
+		{"a", "line", "A", ""},
+		{"b", "line", "B", ""},
+	}, 1, 1)
+	h := strip(m.hint())
+	if !strings.Contains(h, "󱊷") {
+		t.Fatalf("form hint must use 󱊷 ESC glyph: %q", h)
+	}
+	if strings.Contains(h, "⎋") {
+		t.Fatalf("form hint must not use ⎋ glyph: %q", h)
+	}
+}

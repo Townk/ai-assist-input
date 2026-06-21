@@ -82,7 +82,7 @@ func main() {
 		case "choose":
 			m := newChooseModel(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
 			m.width = width
-			rendered = m.render()
+			rendered = m.maxRender()
 		case "form":
 			var raw string
 			if spec != "" {
@@ -106,8 +106,8 @@ func main() {
 				os.Exit(1)
 			}
 			m := newFormModel(*theme, title, parsed, padding, inset)
-			m.width = width
-			rendered = m.render()
+			fmt.Println(m.maxHeight(width))
+			return
 		default:
 			fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
 			os.Exit(2)

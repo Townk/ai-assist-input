@@ -268,8 +268,27 @@ func (m formModel) hint() string {
 	return strings.Join([]string{
 		seg("⇄", "field"),
 		seg("↵", "next"),
-		seg("⎋", "cancel"),
+		seg("󱊷", "dismiss"),
 	}, sep)
+}
+
+// maxHeight returns the tallest rendered height (in lines) across all field
+// focus states at the given width. The measure branch calls this instead of
+// measuring a single render() (which only reflects focus=0) so that the pane
+// is sized for the worst-case navigable height.
+func (m formModel) maxHeight(width int) int {
+	m.width = width
+	saved := m.focus
+	max := 0
+	for i := range m.fields {
+		m.focus = i
+		h := measureHeight(m.render())
+		if h > max {
+			max = h
+		}
+	}
+	m.focus = saved
+	return max
 }
 
 func (m formModel) render() string {

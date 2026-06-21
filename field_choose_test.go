@@ -231,6 +231,36 @@ func TestChooseMultiSelectionsPreservedWhenEmptyOtherFocused(t *testing.T) {
 	}
 }
 
+// I1: the worst-case (max) measured height of a choose with --other must
+// account for the other row being expanded (embedded textField visible), not
+// the 1-line collapsed placeholder.
+func TestChooseOtherMaxLinesAccountsForExpandedRow(t *testing.T) {
+	const innerW = 50
+	// A choose with 2 options + other row.
+	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")
+
+	// Collapsed (other row not focused): measure the collapsed line count.
+	collapsedLines := f.lines(innerW)
+
+	// Navigate onto the other row so it expands.
+	fExpanded := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
+	fExpanded, _, _ = fExpanded.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	fExpanded, _, _ = fExpanded.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // on other row
+
+	expandedLines := fExpanded.lines(innerW)
+
+	if expandedLines <= collapsedLines {
+		t.Fatalf("expanded other row must be taller than collapsed: collapsed=%d expanded=%d", collapsedLines, expandedLines)
+	}
+
+	// maxLines() on the original (not-yet-navigated) field must equal expandedLines —
+	// it must report the worst-case height regardless of current highlight position.
+	got := f.maxLines(innerW)
+	if got != expandedLines {
+		t.Fatalf("maxLines(%d)=%d want %d (expanded other row height)", innerW, got, expandedLines)
+	}
+}
+
 func TestChooseHintRangeAndEscGlyph(t *testing.T) {
 	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/)
 	plain := strip(h)
