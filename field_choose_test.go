@@ -50,8 +50,8 @@ func TestChooseRendersListNoFuzzy(t *testing.T) {
 		t.Fatal("options must render")
 	}
 	// Number prefixes are gone; radio indicators must appear instead.
-	if !strings.Contains(out, "󰄵") && !strings.Contains(out, "󰄱") {
-		t.Fatal("rows must show radio indicators (󰄵 or 󰄱)")
+	if !strings.Contains(out, "󰄯") && !strings.Contains(out, "󰄰") {
+		t.Fatal("rows must show radio indicators (󰄯 or 󰄰)")
 	}
 }
 
@@ -290,27 +290,28 @@ func TestChooseHintRangeAndEscGlyph(t *testing.T) {
 
 func TestChooseSingleShowsRadio(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
-	// highlight is row 0; single-select radio: checked on highlighted row, empty elsewhere
+	// highlight is row 0; single-select radio reflects focus: focused glyph on the
+	// highlighted row, unfocused glyph elsewhere.
 	out := strip(f.view(30, true))
 	lines := strings.Split(out, "\n")
-	if !strings.Contains(lines[0], "󰄵") { // checked radio on the highlighted row
-		t.Fatalf("highlighted single row must show the checked radio 󰄵: %q", lines[0])
+	if !strings.Contains(lines[0], "󰄯") { // focused radio on the highlighted row
+		t.Fatalf("highlighted single row must show the focused radio 󰄯: %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "󰄱") { // empty radio on the other row
-		t.Fatalf("non-highlighted single row must show the empty radio 󰄱: %q", lines[1])
+	if !strings.Contains(lines[1], "󰄰") { // unfocused radio on the other row
+		t.Fatalf("non-highlighted single row must show the unfocused radio 󰄰: %q", lines[1])
 	}
 }
 
 func TestChooseMultiShowsAndTogglesCheckbox(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, true, ""))
-	// initially all empty checkboxes
-	if !strings.Contains(strip(f.view(30, true)), "󰄰") {
-		t.Fatal("multi rows must show the empty checkbox 󰄰")
+	// initially all unchecked checkboxes
+	if !strings.Contains(strip(f.view(30, true)), "󰄱") {
+		t.Fatal("multi rows must show the unchecked checkbox 󰄱")
 	}
 	// space toggles the highlighted row → checked checkbox visible
 	f2, _, _ := f.handle(tea.KeyPressMsg{Code: ' ', Text: " "})
-	if !strings.Contains(strip(f2.view(30, true)), "󰄳") {
-		t.Fatalf("after toggling, a checked checkbox 󰄳 must be visible: %q", strip(f2.view(30, true)))
+	if !strings.Contains(strip(f2.view(30, true)), "󰄵") {
+		t.Fatalf("after toggling, a checked checkbox 󰄵 must be visible: %q", strip(f2.view(30, true)))
 	}
 }
 

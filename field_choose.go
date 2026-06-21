@@ -9,10 +9,13 @@ import (
 
 // Indicator glyphs (Nerd Font, each 1 cell wide).
 const (
-	radioChecked    = "󰄵" // U+F0135 — selected single-choice row
-	radioEmpty      = "󰄱" // U+F0131 — unselected single-choice row
-	checkboxChecked = "󰄳" // U+F0133 — checked multi-choice row
-	checkboxEmpty   = "󰄰" // U+F0130 — unchecked multi-choice row
+	// Single-select uses a radio whose glyph reflects FOCUS (the highlighted row).
+	radioFocused   = "󰄯" // U+F012F — single-select, highlighted row
+	radioUnfocused = "󰄰" // U+F0130 — single-select, non-highlighted row
+	// Multi-select uses a checkbox whose glyph reflects CHECK status only
+	// (independent of focus).
+	checkboxChecked   = "󰄵" // U+F0135 — multi-select, checked
+	checkboxUnchecked = "󰄱" // U+F0131 — multi-select, unchecked
 
 	// gutterLen is the number of terminal columns used by the fixed gutter
 	// that precedes every option label: " <indicator> " = 3 cells.
@@ -236,13 +239,13 @@ func (f *chooseField) renderOptionRow(
 		if f.toggled[i] {
 			indicator = checkboxChecked
 		} else {
-			indicator = checkboxEmpty
+			indicator = checkboxUnchecked
 		}
 	} else {
 		if isHL {
-			indicator = radioChecked
+			indicator = radioFocused
 		} else {
-			indicator = radioEmpty
+			indicator = radioUnfocused
 		}
 	}
 
@@ -341,13 +344,13 @@ func (f *chooseField) view(innerW int, focused bool) string {
 				if f.otherField.value() != "" {
 					otherIndicator = checkboxChecked
 				} else {
-					otherIndicator = checkboxEmpty
+					otherIndicator = checkboxUnchecked
 				}
 			} else {
 				if isHL {
-					otherIndicator = radioChecked
+					otherIndicator = radioFocused
 				} else {
-					otherIndicator = radioEmpty
+					otherIndicator = radioUnfocused
 				}
 			}
 
