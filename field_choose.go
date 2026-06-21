@@ -125,7 +125,7 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 		c.selected = n
 		return &c, fieldDone, nil
 
-	case kp.Code == tea.KeySpace && c.multi:
+	case (kp.Code == tea.KeySpace || kp.Code == ' ') && c.multi:
 		if !c.isOtherRow(c.highlight) {
 			c.toggled[c.highlight] = !c.toggled[c.highlight]
 		}

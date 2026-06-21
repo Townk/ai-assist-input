@@ -73,20 +73,43 @@ func (m chooseModel) innerW() int {
 	return w
 }
 
-func (m chooseModel) hint() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Key))
-	word := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
-	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
-	sep := word.Render(" · ")
-	segs := []string{
-		seg("↑↓/jk", "move"),
-		seg("1-9", "pick"),
+// chooseHint builds the keyboard-hint line for a choose dialog.
+// Only key glyphs are rendered in theme.Key (bright white); separators,
+// dashes, and descriptive words are in theme.Muted (dark grey).
+// rows is the total number of selectable rows; it caps the shortcut range at 9.
+func chooseHint(t Theme, rows int, multi bool) string {
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Key))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Muted))
+	seg := func(k, w string) string { return keyStyle.Render(k) + mutedStyle.Render(w) }
+	sep := mutedStyle.Render(" · ")
+
+	// Move segment: ↑↓ / jk move
+	move := seg("↑↓", "") + mutedStyle.Render("/") + seg("jk", " move")
+
+	// Pick segment: 1-N pick (or just 1 pick when only 1 row)
+	var pick string
+	n := rows
+	if n > 9 {
+		n = 9
 	}
-	if m.multi {
-		segs = append(segs, seg("space", "toggle"))
+	if n <= 1 {
+		pick = seg("1", " pick")
+	} else {
+		pick = keyStyle.Render("1") + mutedStyle.Render("-") + keyStyle.Render(fmt.Sprintf("%d", n)) + mutedStyle.Render(" pick")
 	}
-	segs = append(segs, seg("↵", "ok"), seg("⎋", "cancel"))
+
+	segs := []string{move, pick}
+
+	if multi {
+		segs = append(segs, seg("space", " toggle"))
+	}
+
+	segs = append(segs, seg("↵", " ok"), seg("󱊷", " dismiss"))
 	return strings.Join(segs, sep)
+}
+
+func (m chooseModel) hint() string {
+	return chooseHint(m.theme, m.fld.totalRows(), m.multi)
 }
 
 func (m chooseModel) render() string {

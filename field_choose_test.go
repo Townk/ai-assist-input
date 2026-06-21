@@ -167,3 +167,26 @@ func TestChooseLongOptionWraps(t *testing.T) {
 		t.Fatalf("wrapped continuation must be indented under the label: %q", cont)
 	}
 }
+
+func TestChooseMultiSpaceAsRune(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, true, ""))
+	// a real space keypress arrives as Code=' ' (0x20), Text=" "
+	f2, _, _ := f.handle(tea.KeyPressMsg{Code: ' ', Text: " "})
+	if f2.value() != "a" {
+		t.Fatalf("space (rune) must toggle the highlighted row; value=%q", f2.value())
+	}
+}
+
+func TestChooseHintRangeAndEscGlyph(t *testing.T) {
+	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/)
+	plain := strip(h)
+	if !strings.Contains(plain, "1-3") {
+		t.Fatalf("hint must show the number range 1-3: %q", plain)
+	}
+	if !strings.Contains(plain, "󱊷") {
+		t.Fatalf("hint must use the 󱊷 ESC glyph: %q", plain)
+	}
+	if strings.Contains(plain, "⎋") {
+		t.Fatalf("hint must not use the ⎋ glyph: %q", plain)
+	}
+}
