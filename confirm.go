@@ -3,44 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 )
 
-type confirmModel struct {
-	theme          Theme
-	variant        string
-	title          string
-	prompt         string
-	affirmative    string
-	negative       string
-	affKey, negKey rune
-	focus          int // 0 = affirmative (left), 1 = negative (right)
-	width          int
-	padding, inset int
-	cancelled      bool
-	result         string // "yes" | "no"
-}
-
-func newConfirmModel(theme Theme, variant, title, prompt, affirmative, negative string, defaultNegative bool, padding, inset int) confirmModel {
-	aff, neg := deriveKeys(affirmative, negative)
-	focus := 0
-	if defaultNegative {
-		focus = 1
-	}
-	return confirmModel{
-		theme: theme, variant: variant, title: title, prompt: prompt,
-		affirmative: affirmative, negative: negative,
-		affKey: aff, negKey: neg, focus: focus,
-		width: 54, padding: padding, inset: inset,
-	}
-}
-
-func (m confirmModel) Init() tea.Cmd { return nil }
-
+// confirmKeyString normalises a KeyPressMsg to a string understood by
+// resolveConfirmKey (in confirm_keys.go).
 func confirmKeyString(msg tea.KeyPressMsg) string {
 	switch msg.Key().Code {
 	case tea.KeyEscape:
@@ -57,71 +27,77 @@ func confirmKeyString(msg tea.KeyPressMsg) string {
 	return msg.String()
 }
 
+// confirmModel is the thin bubbletea wrapper over a confirmField. It owns the
+// frame (title/prompt/variant/theme/width/padding/inset) and delegates all
+// key handling to the field.
+type confirmModel struct {
+	fld       *confirmField
+	theme     Theme
+	variant   string
+	title     string
+	prompt    string
+	width     int
+	padding   int
+	inset     int
+	cancelled bool
+	// focus mirrors fld.focus so existing tests that inspect m.focus still pass.
+	focus int
+}
+
+func newConfirmModel(theme Theme, variant, title, prompt, affirmative, negative string, defaultNegative bool, padding, inset int) confirmModel {
+	fld := newConfirmField(theme, variant, affirmative, negative, defaultNegative)
+	return confirmModel{
+		fld:     fld,
+		theme:   theme,
+		variant: variant,
+		title:   title,
+		prompt:  prompt,
+		focus:   fld.focus,
+		width:   54,
+		padding: padding,
+		inset:   inset,
+	}
+}
+
+func (m confirmModel) Init() tea.Cmd { return nil }
+
 func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		return m, nil
 	case tea.KeyPressMsg:
-		switch resolveConfirmKey(confirmKeyString(msg), m.affKey, m.negKey) {
-		case actAffirm:
-			m.result = "yes"
+		f2, act, cmd := m.fld.handle(msg)
+		m.fld = f2.(*confirmField)
+		m.focus = m.fld.focus
+		switch act {
+		case fieldDone:
 			return m, tea.Quit
-		case actNegate:
-			m.result = "no"
-			return m, tea.Quit
-		case actSubmit:
-			if m.focus == 0 {
-				m.result = "yes"
-			} else {
-				m.result = "no"
-			}
-			return m, tea.Quit
-		case actFocusLeft:
-			m.focus = 0
-		case actFocusRight:
-			m.focus = 1
-		case actToggle:
-			m.focus = 1 - m.focus
-		case actCancel:
+		case fieldCancel:
 			m.cancelled = true
 			return m, tea.Quit
 		}
+		return m, cmd
 	}
 	return m, nil
 }
 
-func (m confirmModel) button(label string, focused bool) string {
-	st := lipgloss.NewStyle().Padding(0, 2)
-	if focused {
-		bg, fg := m.theme.ButtonSelBg, m.theme.ButtonSelFg
-		switch m.variant {
-		case "danger":
-			bg = m.theme.Danger
-		case "warning":
-			bg, fg = m.theme.Warning, m.theme.Base
-		}
-		return st.Background(lipgloss.Color(bg)).Foreground(lipgloss.Color(fg)).Render(label)
+func (m confirmModel) innerW() int {
+	w := m.width - frameBorder - 2*frameHPad
+	if w < 1 {
+		w = 1
 	}
-	return st.Background(lipgloss.Color(m.theme.ButtonBg)).Foreground(lipgloss.Color(m.theme.ButtonFg)).Render(label)
-}
-
-func (m confirmModel) hint() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Key))
-	word := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
-	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
-	sep := word.Render(" · ")
-	return strings.Join([]string{
-		seg("󱊷", "dismiss"),
-		seg(string(m.affKey), strings.ToLower(m.affirmative)),
-		seg(string(m.negKey), strings.ToLower(m.negative)),
-	}, sep)
+	return w
 }
 
 func (m confirmModel) render() string {
-	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt)
-	buttons := m.button(m.affirmative, m.focus == 0) + "    " + m.button(m.negative, m.focus == 1)
-	return renderFrame(m.theme, m.variant, m.title, []string{prompt, buttons}, m.hint(), m.width, m.padding, m.inset)
+	iW := m.innerW()
+	sections := []string{}
+	if m.prompt != "" {
+		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
+	}
+	sections = append(sections, m.fld.view(iW, true))
+	return renderFrame(m.theme, m.variant, m.title, sections, m.fld.hint(), m.width, m.padding, m.inset)
 }
 
 func (m confirmModel) View() tea.View { return tea.NewView(m.render()) }
@@ -137,11 +113,12 @@ func runConfirm(theme Theme, variant, title, prompt, affirmative, negative strin
 		os.Exit(1)
 	}
 	res := fm.(confirmModel)
-	if res.cancelled || res.result == "" {
+	if res.cancelled || !res.fld.accepted {
 		os.Exit(130)
 	}
-	fmt.Print(res.result)
-	if res.result == "yes" {
+	result := res.fld.accepted_v
+	fmt.Print(result)
+	if result == "yes" {
 		os.Exit(0)
 	}
 	os.Exit(1)
