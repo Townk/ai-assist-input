@@ -219,7 +219,7 @@ func wrapLabel(labelText string, colW int) []string {
 func (f *chooseField) renderOptionRow(
 	i, innerW int,
 	isHL bool,
-	hlStyle, normStyle, mutedStyle, markerSelStyle lipgloss.Style,
+	hlStyle, mutedStyle, markerSelStyle lipgloss.Style,
 ) []string {
 	opt := f.options[i]
 
@@ -264,8 +264,10 @@ func (f *chooseField) renderOptionRow(
 			// Pad the whole line to innerW with the highlight background.
 			resultLines = append(resultLines, hlStyle.Width(innerW).Render(lineText))
 		} else {
+			// Non-highlighted rows use the muted (unselected-tab) foreground so
+			// they read as clearly dimmer than the highlighted row. A toggled
+			// multi checkbox keeps the accent fill so its state stays visible.
 			if li == 0 {
-				// Style the indicator distinctly; label in normal text colour.
 				var indStyled string
 				if f.multi && f.toggled[i] {
 					indStyled = markerSelStyle.Render(indicator)
@@ -273,9 +275,9 @@ func (f *chooseField) renderOptionRow(
 					indStyled = mutedStyle.Render(indicator)
 				}
 				resultLines = append(resultLines,
-					mutedStyle.Render(" ")+indStyled+mutedStyle.Render(" ")+normStyle.Render(tl))
+					mutedStyle.Render(" ")+indStyled+mutedStyle.Render(" ")+mutedStyle.Render(tl))
 			} else {
-				resultLines = append(resultLines, normStyle.Render(lineText))
+				resultLines = append(resultLines, mutedStyle.Render(lineText))
 			}
 		}
 	}
@@ -299,8 +301,6 @@ func (f *chooseField) view(innerW int, focused bool) string {
 	hlStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color(selBg)).
 		Foreground(lipgloss.Color(selFg))
-	normStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(f.theme.Text))
 	mutedStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(f.theme.Muted))
 	markerSelStyle := lipgloss.NewStyle().
@@ -354,21 +354,34 @@ func (f *chooseField) view(innerW int, focused bool) string {
 			// line.  Normally gutterLen + boxW == innerW; when boxW was clamped up we use
 			// the actual rendered width so highlight padding never causes re-wrapping.
 			hlW := gutterLen + boxW
-			// Pass focused=true so the box always renders with its active style;
-			// when the other row is not highlighted we still show the box but
-			// apply gutter in muted style.
-			boxView := f.otherField.view(boxW, isHL)
+
+			// Focus-dependent styling:
+			//  - focused   → selected background on the box, bright-white (selFg)
+			//                border/icon/text, placeholder shown; gutter highlighted.
+			//  - unfocused → entire widget (border, icon, text) in the muted
+			//                (unselected-tab) colour, no placeholder when empty.
+			var st taStyle
+			var gutterStyle lipgloss.Style
+			if isHL {
+				st = taStyle{icon: selFg, border: selFg, text: selFg, bg: selBg, placeholder: true}
+				gutterStyle = hlStyle
+			} else {
+				st = taStyle{icon: f.theme.Muted, border: f.theme.Muted, text: f.theme.Muted, bg: "", placeholder: false}
+				gutterStyle = mutedStyle
+			}
+			boxView := f.otherField.viewWith(boxW, st)
 			boxLines := strings.Split(boxView, "\n")
 			var guttered []string
 			for li, bl := range boxLines {
 				var line string
 				if li == 0 {
-					line = mutedStyle.Render(gutterText) + bl
+					line = gutterStyle.Render(gutterText) + bl
 				} else {
-					line = gutterBlank + bl
+					line = gutterStyle.Render(gutterBlank) + bl
 				}
 				if isHL {
-					// Full-item highlight: pad all 4 lines to hlW (>= innerW).
+					// Full-item highlight: pad all 4 lines to hlW (>= innerW) so the
+					// selected background spans the whole item.
 					guttered = append(guttered, hlStyle.Width(hlW).Render(line))
 				} else {
 					guttered = append(guttered, line)
@@ -378,7 +391,7 @@ func (f *chooseField) view(innerW int, focused bool) string {
 			continue
 		}
 
-		optRows := f.renderOptionRow(i, innerW, isHL, hlStyle, normStyle, mutedStyle, markerSelStyle)
+		optRows := f.renderOptionRow(i, innerW, isHL, hlStyle, mutedStyle, markerSelStyle)
 		rows = append(rows, optRows...)
 	}
 

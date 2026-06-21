@@ -12,10 +12,22 @@ import (
 // covers both the "line" variant (singleLine=true, height=1, no scrollbar) and
 // the "text" variant (singleLine=false, multiline with scrollbar).
 type textField struct {
-	ta         textarea.Model
-	theme      Theme
-	singleLine bool
-	taHeight   int
+	ta          textarea.Model
+	theme       Theme
+	singleLine  bool
+	taHeight    int
+	placeholder string // original placeholder text (so viewWith can hide/restore it)
+}
+
+// taStyle carries the focus-dependent colors used to render a textField box.
+// It lets the choose "other" row recolor the whole widget (border, icon, text,
+// background) per focus state, and hide the placeholder when unfocused+empty.
+type taStyle struct {
+	icon        string // icon glyph foreground
+	border      string // box border foreground
+	text        string // textarea text foreground
+	bg          string // box interior background ("" = none/terminal default)
+	placeholder bool   // show the placeholder when the field is empty
 }
 
 // newTextField constructs a textField. value is the initial text; placeholder
@@ -50,10 +62,11 @@ func newTextField(theme Theme, value, placeholder string, height int, singleLine
 	ta.SetHeight(height)
 
 	return &textField{
-		ta:         ta,
-		theme:      theme,
-		singleLine: singleLine,
-		taHeight:   height,
+		ta:          ta,
+		theme:       theme,
+		singleLine:  singleLine,
+		taHeight:    height,
+		placeholder: placeholder,
 	}
 }
 
@@ -101,12 +114,24 @@ func (f *textField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 }
 
 // view renders the rounded inner box with icon column, textarea, and (for
-// multiline) the scrollbar. innerW is the width available inside the outer
-// frame (frame-chrome already subtracted). focused currently unused but kept
-// for the interface; future tasks may blur non-active fields.
+// multiline) the scrollbar, using the field's default theme colors. innerW is
+// the width available inside the outer frame (frame-chrome already subtracted).
 func (f *textField) view(innerW int, focused bool) string {
-	// Size the textarea from innerW each render pass; avoids needing an
-	// explicit setWidth call from the wrapper.
+	return f.viewWith(innerW, taStyle{
+		icon:        f.theme.Accent,
+		border:      f.theme.FieldBorder,
+		text:        f.theme.Text,
+		bg:          "",
+		placeholder: true,
+	})
+}
+
+// viewWith renders the box with explicit focus-dependent colors. The default
+// view() delegates here with the theme defaults; the choose "other" row passes
+// muted colors when unfocused (and hides the placeholder) and selected
+// background + bright-white foregrounds when focused.
+func (f *textField) viewWith(innerW int, st taStyle) string {
+	// Size the textarea from innerW each render pass.
 	taW := innerW - boxBorder - boxPadL - iconCol
 	if !f.singleLine {
 		taW -= scrollGap + scrollCol
@@ -117,16 +142,45 @@ func (f *textField) view(innerW int, focused bool) string {
 	f.ta.SetWidth(taW)
 	f.ta.SetHeight(f.taHeight)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumn(f.ta.Height(), f.theme), f.ta.View())
+	// Toggle the placeholder (restored before return).
+	saved := f.ta.Placeholder
+	if st.placeholder {
+		f.ta.Placeholder = f.placeholder
+	} else {
+		f.ta.Placeholder = ""
+	}
+	defer func() { f.ta.Placeholder = saved }()
+
+	// Apply the requested text foreground (and background, if any). Leaving the
+	// text background unset lets the box-level Background fill the interior.
+	s := textarea.DefaultDarkStyles()
+	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(st.text))
+	s.Focused.Base = lipgloss.NewStyle()
+	s.Blurred.Base = lipgloss.NewStyle()
+	s.Focused.Text = textStyle
+	s.Blurred.Text = textStyle
+	s.Focused.CursorLine = lipgloss.NewStyle()
+	s.Blurred.CursorLine = lipgloss.NewStyle()
+	if st.bg != "" {
+		ph := s.Focused.Placeholder.Background(lipgloss.Color(st.bg))
+		s.Focused.Placeholder = ph
+		s.Blurred.Placeholder = ph
+	}
+	f.ta.SetStyles(s)
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), st.icon), f.ta.View())
 	if !f.singleLine {
 		gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", f.ta.Height()), "\n")
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, gap, scrollbar(f))
 	}
-	return lipgloss.NewStyle().
+	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(f.theme.FieldBorder)).
-		Padding(0, 0, 0, boxPadL).
-		Render(body)
+		BorderForeground(lipgloss.Color(st.border)).
+		Padding(0, 0, 0, boxPadL)
+	if st.bg != "" {
+		box = box.Background(lipgloss.Color(st.bg)).BorderBackground(lipgloss.Color(st.bg))
+	}
+	return box.Render(body)
 }
 
 func (f *textField) value() string { return f.ta.Value() }
@@ -191,11 +245,13 @@ func scrollbar(f *textField) string {
 	return strings.Join(rows, "\n")
 }
 
-func iconColumn(h int, theme Theme) string {
+// iconColumnColored renders the prompt-icon column with an explicit foreground
+// color (so the choose "other" row can recolor the icon per focus state).
+func iconColumnColored(h int, fg string) string {
 	if h < 1 {
 		h = 1
 	}
-	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Accent)).Render(promptIcon)
+	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Render(promptIcon)
 	rows := make([]string, h)
 	rows[0] = icon + "  "
 	for i := 1; i < h; i++ {
