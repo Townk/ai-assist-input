@@ -17,6 +17,7 @@ type textField struct {
 	singleLine  bool
 	taHeight    int
 	placeholder string // original placeholder text (so viewWith can hide/restore it)
+	iconGlyph   string // prompt-column glyph (defaults to promptIcon)
 }
 
 // taStyle carries the focus-dependent colors used to render a textField box.
@@ -67,6 +68,7 @@ func newTextField(theme Theme, value, placeholder string, height int, singleLine
 		singleLine:  singleLine,
 		taHeight:    height,
 		placeholder: placeholder,
+		iconGlyph:   promptIcon,
 	}
 }
 
@@ -183,7 +185,7 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 	}
 	f.ta.SetStyles(s)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), st.icon, st.bg), f.ta.View())
+	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), f.iconGlyph, st.icon, st.bg), f.ta.View())
 	if !f.singleLine {
 		gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", f.ta.Height()), "\n")
 		if st.bg != "" {
@@ -277,10 +279,11 @@ func scrollbarColored(f *textField, bg string) string {
 	return strings.Join(rows, "\n")
 }
 
-// iconColumnColored renders the prompt-icon column with an explicit foreground
-// color and optional background (so the choose "other" row can recolor the icon
-// per focus state and keep the selected background unbroken).
-func iconColumnColored(h int, fg, bg string) string {
+// iconColumnColored renders the prompt-icon column with an explicit glyph,
+// foreground color, and optional background (so the choose "other" row can
+// recolor the icon per focus state and keep the selected background unbroken,
+// and callers can override the glyph via --icon).
+func iconColumnColored(h int, glyph, fg, bg string) string {
 	if h < 1 {
 		h = 1
 	}
@@ -291,7 +294,7 @@ func iconColumnColored(h int, fg, bg string) string {
 		blankStyle = blankStyle.Background(lipgloss.Color(bg))
 	}
 	rows := make([]string, h)
-	rows[0] = iconStyle.Render(promptIcon) + blankStyle.Render("  ")
+	rows[0] = iconStyle.Render(glyph) + blankStyle.Render("  ")
 	for i := 1; i < h; i++ {
 		rows[i] = blankStyle.Render(strings.Repeat(" ", iconCol))
 	}

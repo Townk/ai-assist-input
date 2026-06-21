@@ -47,7 +47,7 @@ func TestRenderLayout(t *testing.T) {
 // TestTextRendersPromptAboveBox verifies that a non-empty --prompt string
 // renders above the input box, inside the frame.
 func TestTextRendersPromptAboveBox(t *testing.T) {
-	m := newInputModel(defaultTheme(), "default", "Notes", "Describe the issue", "", "", 3, 1, 1, false)
+	m := newInputModel(defaultTheme(), "default", "Notes", "Describe the issue", "", "", 3, 1, 1, false, "")
 	m.width = 60
 	m.resize()
 	plain := strip(m.render())
@@ -74,7 +74,7 @@ func TestTextRendersPromptAboveBox(t *testing.T) {
 }
 
 func TestTextNoPromptRowWhenEmpty(t *testing.T) {
-	m := newInputModel(defaultTheme(), "default", "Notes", "", "", "", 3, 1, 1, false)
+	m := newInputModel(defaultTheme(), "default", "Notes", "", "", "", 3, 1, 1, false, "")
 	m.width = 60
 	m.resize()
 	// the line after the rule should be the box top, not a blank prompt line
@@ -94,7 +94,7 @@ func TestTextNoPromptRowWhenEmpty(t *testing.T) {
 // TestLineHasNoScrollbarOrNewline pins the line variant: single row, no
 // scrollbar, and a hint without the newline affordance.
 func TestLineHasNoScrollbarOrNewline(t *testing.T) {
-	m := newInputModel(defaultTheme(), "default", "Name", "", "", "type…", 1, 1, 1, true)
+	m := newInputModel(defaultTheme(), "default", "Name", "", "", "type…", 1, 1, 1, true, "")
 	m.width = 60
 	m.resize()
 	plain := strip(m.render())
@@ -185,5 +185,19 @@ func TestTextUsesChevronIcon(t *testing.T) {
 	}
 	if strings.Contains(out, "󰧑") {
 		t.Fatal("old brain icon must be gone")
+	}
+}
+
+// --icon overrides the default prompt glyph (e.g. ai-assist-popup uses 󰧑).
+func TestTextIconOverride(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "ai-assist", "How can I help you today?", "", "", 3, 1, 1, false, "󰧑")
+	m.width = 60
+	m.resize()
+	out := strip(m.render())
+	if !strings.Contains(out, "󰧑") {
+		t.Fatalf("--icon override must render the given glyph: %q", out)
+	}
+	if strings.Contains(out, "❯") {
+		t.Fatal("overridden icon must replace the default ❯")
 	}
 }

@@ -22,7 +22,7 @@ func main() {
 	runewidth.DefaultCondition.EastAsianWidth = false
 
 	fs := flag.NewFlagSet("ai-assist-input", flag.ExitOnError)
-	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec string
+	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec, icon string
 	var height, padding, inset, width int
 	var danger, warning, multi, measure bool
 	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose|form")
@@ -42,6 +42,7 @@ func main() {
 	fs.StringVar(&defaultSide, "default", "affirmative", "confirm default focus: affirmative|negative")
 	fs.BoolVar(&multi, "multi", false, "choose: allow multiple selections")
 	fs.StringVar(&other, "other", "", "choose: label for free-text other entry (empty disables)")
+	fs.StringVar(&icon, "icon", "", "text/line: prompt-column glyph override (default ❯)")
 	fs.BoolVar(&measure, "measure", false, "print the rendered height and exit (no TUI)")
 	fs.IntVar(&width, "width", 50, "pane width for measurement/sizing")
 	theme := registerThemeFlags(fs)
@@ -70,12 +71,12 @@ func main() {
 			m.width = width
 			rendered = m.render()
 		case "line":
-			m := newInputModel(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true)
+			m := newInputModel(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon)
 			m.width = width
 			m.resize()
 			rendered = m.render()
 		case "text":
-			m := newInputModel(*theme, variant, title, prompt, value, "", height, padding, inset, false)
+			m := newInputModel(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon)
 			m.width = width
 			m.resize()
 			rendered = m.render()
@@ -123,9 +124,9 @@ func main() {
 		}
 		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset)
 	case "line":
-		runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true)
+		runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon)
 	case "text":
-		runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false)
+		runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon)
 	case "choose":
 		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
 	case "form":

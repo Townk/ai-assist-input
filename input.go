@@ -40,11 +40,14 @@ type model struct {
 // initialModel keeps the original signature the existing tests call (text, 1/1
 // padding/inset, default theme).
 func initialModel(value, title string, height int) model {
-	return newInputModel(defaultTheme(), "default", title, "", value, "", height, 1, 1, false)
+	return newInputModel(defaultTheme(), "default", title, "", value, "", height, 1, 1, false, "")
 }
 
-func newInputModel(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool) model {
+func newInputModel(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon string) model {
 	fld := newTextField(theme, value, placeholder, height, singleLine)
+	if icon != "" {
+		fld.iconGlyph = icon
+	}
 	return model{
 		fld: fld, theme: theme, variant: variant, title: title, prompt: prompt,
 		singleLine: singleLine, width: 64,
@@ -119,9 +122,9 @@ func (m model) View() tea.View {
 	return v
 }
 
-func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool) {
+func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon string) {
 	fm, err := tea.NewProgram(
-		newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine),
+		newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon),
 		tea.WithOutput(os.Stderr),
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
