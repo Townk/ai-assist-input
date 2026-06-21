@@ -243,8 +243,3 @@ func runInput(theme Theme, variant, title, value, placeholder string, height, pa
 	}
 	os.Exit(130)
 }
-
-// TEMP stub — replaced by confirm.go in Task 5.
-func runConfirm(theme Theme, variant, title, prompt, affirmative, negative string, defaultNegative bool, padding, inset int) {
-	os.Exit(2)
-}
