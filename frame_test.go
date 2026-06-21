@@ -36,11 +36,20 @@ func TestRenderFrameWidth(t *testing.T) {
 
 func TestRenderFramePaddingRows(t *testing.T) {
 	// padding=2 adds two blank rows just inside the top and bottom borders.
+	// Each blank padding row must still be enclosed by the continuous border:
+	// it starts with │, ends with │, and everything in between is spaces.
 	out := strip(renderFrame(defaultTheme(), "default", "T", []string{"B"}, "h", 30, 2, 1))
 	lines := strings.Split(out, "\n")
-	// line[0]=border, line[1]/line[2]=padding blanks, line[3]=title
-	if strings.TrimSpace(lines[1]) != "" || strings.TrimSpace(lines[2]) != "" {
-		t.Fatalf("expected two blank padding rows after the top border, got %q,%q", lines[1], lines[2])
+	// line[0]=border top, line[1]/line[2]=padding blanks, line[3]=title
+	for _, idx := range []int{1, 2} {
+		l := lines[idx]
+		if !strings.HasPrefix(l, "│") || !strings.HasSuffix(l, "│") {
+			t.Fatalf("padding row %d must be enclosed by │...│, got %q", idx, l)
+		}
+		inner := l[len("│") : len(l)-len("│")]
+		if strings.TrimSpace(inner) != "" {
+			t.Fatalf("padding row %d inner must be all spaces, got %q", idx, inner)
+		}
 	}
 	if !strings.Contains(lines[3], "▓▓▓ T") {
 		t.Fatalf("title must follow the padding rows, got %q", lines[3])

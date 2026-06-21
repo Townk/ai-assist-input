@@ -23,61 +23,26 @@ func renderFrame(t Theme, variant, title string, body []string, hint string, wid
 	}
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.titleColor(variant)))
 	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Rule))
-	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.variantColor(variant)))
 
-	rows := []string{}
-
-	// Top border
-	rows = append(rows, borderStyle.Render("╭"+strings.Repeat("─", width-2)+"╮"))
-
-	// Padding rows (blank, just spaces to reach full width)
-	blankRow := strings.Repeat(" ", width)
-	for i := 0; i < padding; i++ {
-		rows = append(rows, blankRow)
+	rows := []string{
+		titleStyle.Render("▓▓▓ " + title),
+		ruleStyle.Render(strings.Repeat("━", innerW)),
 	}
-
-	// Title
-	contentRow := func(content string) string {
-		padded := content + strings.Repeat(" ", innerW-lipgloss.Width(content))
-		return borderStyle.Render("│") + strings.Repeat(" ", frameHPad) + padded + strings.Repeat(" ", frameHPad) + borderStyle.Render("│")
-	}
-	rows = append(rows, contentRow(titleStyle.Render("▓▓▓ " + title)))
-
-	// Rule
-	rows = append(rows, contentRow(ruleStyle.Render(strings.Repeat("━", innerW))))
-
-	// Inset gap
-	for i := 0; i < inset; i++ {
-		rows = append(rows, blankRow)
-	}
-
-	// Body sections
+	rows = appendBlanks(rows, inset)
 	for i, sec := range body {
 		if i > 0 {
-			for j := 0; j < inset; j++ {
-				rows = append(rows, blankRow)
-			}
+			rows = appendBlanks(rows, inset)
 		}
-		rows = append(rows, contentRow(sec))
+		rows = append(rows, sec)
 	}
+	rows = appendBlanks(rows, inset)
+	rows = append(rows, hint)
 
-	// Inset gap
-	for i := 0; i < inset; i++ {
-		rows = append(rows, blankRow)
-	}
-
-	// Hint
-	rows = append(rows, contentRow(hint))
-
-	// Padding rows (blank, with borders and spacing to reach full width)
-	for i := 0; i < padding; i++ {
-		rows = append(rows, blankRow)
-	}
-
-	// Bottom border
-	rows = append(rows, borderStyle.Render("╰"+strings.Repeat("─", width-2)+"╯"))
-
-	return strings.Join(rows, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.variantColor(variant))).
+		Padding(padding, frameHPad, padding, frameHPad).
+		Render(strings.Join(rows, "\n"))
 }
 
 func appendBlanks(rows []string, n int) []string {
