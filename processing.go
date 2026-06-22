@@ -72,6 +72,9 @@ func (m processingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 	}
 	return m, nil
 }
@@ -136,7 +139,7 @@ func recordSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err er
 
 // writeOutFifo writes a pre-encoded record to path (best-effort; non-blocking).
 func writeOutFifo(path, record string) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return
 	}

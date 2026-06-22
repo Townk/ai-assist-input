@@ -31,3 +31,12 @@ func TestProcessingQuitsOnClose(t *testing.T) {
 		t.Fatalf("close cmd must produce tea.QuitMsg, got %T", msg)
 	}
 }
+
+func TestProcessingModelTracksWindowResize(t *testing.T) {
+	m := newProcessingModel(defaultTheme(), "ai-assist", 50)
+	m2, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := m2.(processingModel).width
+	if got != 80 {
+		t.Fatalf("expected width 80 after WindowSizeMsg, got %d", got)
+	}
+}
