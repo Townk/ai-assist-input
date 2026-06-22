@@ -139,3 +139,90 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 	}
 	os.Exit(130)
 }
+
+// rootModel is a thin wrapper that owns the input→processing transition when
+// --out-fifo/--in-fifo are both set. It holds the currently active tea.Model
+// and switches it from inputModel to processingModel on submit, staying inside
+// the same tea.Program so the floating pane never closes.
+type rootModel struct {
+	current tea.Model
+	theme   Theme
+	title   string
+	width   int
+	outFifo string
+	inFifo  string
+}
+
+func newRootModel(inner model, outFifo, inFifo string) rootModel {
+	return rootModel{
+		current: inner,
+		theme:   inner.theme,
+		title:   inner.title,
+		width:   inner.width,
+		outFifo: outFifo,
+		inFifo:  inFifo,
+	}
+}
+
+func (r rootModel) Init() tea.Cmd { return r.current.Init() }
+
+func (r rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if wm, ok := msg.(tea.WindowSizeMsg); ok {
+		r.width = wm.Width
+		m2, cmd := r.current.Update(msg)
+		r.current = m2
+		return r, cmd
+	}
+
+	// If currently in processing state, delegate all messages to it.
+	if pm, ok := r.current.(processingModel); ok {
+		m2, cmd := pm.Update(msg)
+		r.current = m2
+		return r, cmd
+	}
+
+	// Currently in input state — delegate and check for submit/cancel.
+	m2, cmd := r.current.Update(msg)
+	inputM, isInput := m2.(model)
+	if !isInput {
+		r.current = m2
+		return r, cmd
+	}
+
+	if inputM.submitted {
+		// Write submit record to out-fifo and transition to processing.
+		writeOutFifo(r.outFifo, encodeRecord("submit", inputM.fld.value()))
+		pm := newProcessingModelWithFifo(r.theme, r.title, r.width, r.inFifo)
+		r.current = pm
+		return r, tea.Batch(pm.Init(), readInFifo(r.inFifo))
+	}
+
+	if inputM.quitting {
+		// Write cancel record to out-fifo and quit.
+		writeOutFifo(r.outFifo, encodeRecord("cancel"))
+		return r, tea.Quit
+	}
+
+	r.current = inputM
+	return r, cmd
+}
+
+func (r rootModel) View() tea.View {
+	return r.current.View()
+}
+
+func runInputWithFifo(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFifo, inFifo string) {
+	inner := newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon)
+	root := newRootModel(inner, outFifo, inFifo)
+	_, err := tea.NewProgram(
+		root,
+		tea.WithOutput(os.Stderr),
+		tea.WithColorProfile(colorprofile.TrueColor),
+	).Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
+		os.Exit(1)
+	}
+	// In fifo mode the outcome is communicated via the fifo protocol, not stdout.
+	os.Exit(0)
+}
