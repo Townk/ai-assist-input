@@ -192,7 +192,11 @@ func (r rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if inputM.submitted {
 		// Write submit record to out-fifo and transition to processing.
 		writeOutFifo(r.outFifo, encodeRecord("submit", inputM.fld.value()))
-		pm := newProcessingModelWithFifo(r.theme, r.title, r.width, r.inFifo)
+		// Match the spinner frame to the input frame's exact rendered height (=
+		// the float pane height), so the processing state fills the SAME space —
+		// no shrink, no black gap below where the input box used to be.
+		paneH := len(strings.Split(inputM.render(), "\n"))
+		pm := newProcessingModelWithFifo(r.theme, r.title, r.width, paneH, r.inFifo)
 		r.current = pm
 		// pm.Init() starts the spinner tick AND the first nextRecord receive;
 		// the persistent reader (opened in the constructor) feeds the channel.

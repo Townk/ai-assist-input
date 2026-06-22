@@ -9,7 +9,7 @@ import (
 )
 
 func TestProcessingShowsSpinnerAndStatus(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50)
+	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
 	m2, _ := m.Update(statusMsg("Looking up docs"))
 	out := strip(m2.(processingModel).View().Content) // rendered frame
 	if !strings.Contains(out, "Looking up docs") {
@@ -21,7 +21,7 @@ func TestProcessingShowsSpinnerAndStatus(t *testing.T) {
 }
 
 func TestProcessingQuitsOnClose(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50)
+	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
 	_, cmd := m.Update(closeMsg{})
 	if cmd == nil {
 		t.Fatal("close must return a quit cmd")
@@ -107,10 +107,30 @@ func TestScanRecordsEOFAfterStatusYieldsClose(t *testing.T) {
 }
 
 func TestProcessingModelTracksWindowResize(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50)
+	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	got := m2.(processingModel).width
-	if got != 80 {
-		t.Fatalf("expected width 80 after WindowSizeMsg, got %d", got)
+	pm := m2.(processingModel)
+	if pm.width != 80 {
+		t.Fatalf("expected width 80 after WindowSizeMsg, got %d", pm.width)
+	}
+	if pm.height != 24 {
+		t.Fatalf("expected height 24 after WindowSizeMsg, got %d", pm.height)
+	}
+}
+
+// The processing frame must fill the SAME height as the input dialog it replaced
+// (so the float shows no black gap), with the spinner centered and no hint.
+func TestProcessingFillsPaneHeight(t *testing.T) {
+	m := newProcessingModel(defaultTheme(), "ai-assist", 56, 14)
+	out := m.View().Content
+	if n := len(strings.Split(out, "\n")); n != 14 {
+		t.Fatalf("processing frame should fill the pane height (14), got %d lines:\n%s", n, strip(out))
+	}
+	plain := strip(out)
+	if !strings.Contains(plain, "▓▓▓ ai-assist") {
+		t.Fatalf("title row expected: %q", plain)
+	}
+	if !strings.Contains(plain, "Processing…") {
+		t.Fatalf("centered label expected: %q", plain)
 	}
 }

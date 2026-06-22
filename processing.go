@@ -24,28 +24,32 @@ type processingModel struct {
 	theme   Theme
 	title   string
 	width   int
+	height  int // target total render height (= the float pane height) to fill
 	label   string
 	inFifo  string // path to read status/close records from (empty = no reader)
 	recs    chan tea.Msg
 	spinner spinner.Model
 }
 
-func newProcessingModel(theme Theme, title string, width int) processingModel {
+func newProcessingModel(theme Theme, title string, width, height int) processingModel {
+	// Pulse (█▓▒░) is the boldest width-safe preset — a prominent, centered
+	// "thinking" indicator.
 	sp := spinner.New(
-		spinner.WithSpinner(spinner.Points),
+		spinner.WithSpinner(spinner.Pulse),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Accent))),
 	)
 	return processingModel{
 		theme:   theme,
 		title:   title,
 		width:   width,
+		height:  height,
 		label:   "Processing…",
 		spinner: sp,
 	}
 }
 
-func newProcessingModelWithFifo(theme Theme, title string, width int, inFifo string) processingModel {
-	m := newProcessingModel(theme, title, width)
+func newProcessingModelWithFifo(theme Theme, title string, width, height int, inFifo string) processingModel {
+	m := newProcessingModel(theme, title, width, height)
 	m.inFifo = inFifo
 	// Open the IN fifo ONCE and keep a single persistent scanner across records
 	// so a batched "close" is never dropped. Init() drains it via nextRecord.
@@ -85,16 +89,51 @@ func (m processingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 	}
 	return m, nil
 }
 
+// render draws the same-sized, borderless-pane-filling frame as the input it
+// replaced: title + rule at the top, then the spinner + label centered in the
+// remaining space. It does NOT shrink the frame (which would leave a black gap
+// in the float) and shows no hint statusbar.
 func (m processingModel) render() string {
-	spinFrame := m.spinner.View()
-	body := []string{spinFrame + " " + m.label}
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Render("processing…")
-	return renderFrame(m.theme, "default", m.title, body, hint, m.width, 1, 1)
+	const pad = 1
+	innerW := m.width - frameBorder - 2*frameHPad
+	if innerW < 1 {
+		innerW = 1
+	}
+	// Total render height must equal the float pane height so the frame fills it.
+	h := m.height
+	if h < 5 {
+		h = 5
+	}
+	contentH := h - frameBorder - 2*pad // rows inside the border (minus padding)
+	if contentH < 1 {
+		contentH = 1
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.theme.titleColor("default")))
+	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Rule))
+	title := titleStyle.Render("▓▓▓ " + m.title)
+	rule := ruleStyle.Render(strings.Repeat("━", innerW))
+
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.label)
+	spin := m.spinner.View() + "  " + label
+	bodyH := contentH - 2 // minus the title + rule rows
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	centered := lipgloss.Place(innerW, bodyH, lipgloss.Center, lipgloss.Center, spin)
+
+	content := strings.Join([]string{title, rule, centered}, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(m.theme.variantColor("default"))).
+		Padding(pad, frameHPad, pad, frameHPad).
+		Render(content)
 }
 
 func (m processingModel) View() tea.View {
