@@ -194,7 +194,9 @@ func (r rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		writeOutFifo(r.outFifo, encodeRecord("submit", inputM.fld.value()))
 		pm := newProcessingModelWithFifo(r.theme, r.title, r.width, r.inFifo)
 		r.current = pm
-		return r, tea.Batch(pm.Init(), readInFifo(r.inFifo))
+		// pm.Init() starts the spinner tick AND the first nextRecord receive;
+		// the persistent reader (opened in the constructor) feeds the channel.
+		return r, pm.Init()
 	}
 
 	if inputM.quitting {

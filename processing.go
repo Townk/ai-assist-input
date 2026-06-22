@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -24,7 +25,8 @@ type processingModel struct {
 	title   string
 	width   int
 	label   string
-	inFifo  string // path to read status/close records from (empty = no re-issue)
+	inFifo  string // path to read status/close records from (empty = no reader)
+	recs    chan tea.Msg
 	spinner spinner.Model
 }
 
@@ -45,25 +47,34 @@ func newProcessingModel(theme Theme, title string, width int) processingModel {
 func newProcessingModelWithFifo(theme Theme, title string, width int, inFifo string) processingModel {
 	m := newProcessingModel(theme, title, width)
 	m.inFifo = inFifo
+	// Open the IN fifo ONCE and keep a single persistent scanner across records
+	// so a batched "close" is never dropped. Init() drains it via nextRecord.
+	if inFifo != "" {
+		m.recs = startInFifoReader(inFifo)
+	}
 	return m
 }
 
 func (m processingModel) Init() tea.Cmd {
-	return tea.Tick(m.spinner.Spinner.FPS, func(t time.Time) tea.Msg {
+	tick := tea.Tick(m.spinner.Spinner.FPS, func(t time.Time) tea.Msg {
 		return spinner.TickMsg{Time: t, ID: m.spinner.ID()}
 	})
+	if m.recs == nil {
+		return tick
+	}
+	return tea.Batch(tick, nextRecord(m.recs))
 }
 
 func (m processingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case statusMsg:
 		m.label = string(msg)
-		// Re-issue readInFifo to consume the next record.
-		var nextRead tea.Cmd
-		if m.inFifo != "" {
-			nextRead = readInFifo(m.inFifo)
+		// Re-issue to receive the next record from the persistent reader.
+		var next tea.Cmd
+		if m.recs != nil {
+			next = nextRecord(m.recs)
 		}
-		return m, nextRead
+		return m, next
 	case closeMsg:
 		return m, tea.Quit
 	case tea.QuitMsg:
@@ -90,37 +101,71 @@ func (m processingModel) View() tea.View {
 	return tea.NewView(m.render())
 }
 
-// readInFifo reads one framed record from path and maps:
-//   - "status" → statusMsg(label)
-//   - "close"  → closeMsg{}
-//
-// After each non-close record it re-issues itself so the caller keeps reading.
-func readInFifo(path string) tea.Cmd {
-	return func() tea.Msg {
+// startInFifoReader opens the IN fifo ONCE and starts a goroutine that scans
+// every framed record from it, feeding the returned channel. Opening the fifo
+// for reading blocks until a writer appears, so this runs in its own goroutine.
+// The channel is buffered and is closed by scanRecords on close/EOF, so no
+// record (especially a batched "close") is ever dropped.
+func startInFifoReader(path string) chan tea.Msg {
+	ch := make(chan tea.Msg, 16)
+	go func() {
 		f, err := os.Open(path)
 		if err != nil {
-			return closeMsg{}
+			// No reader could be established — treat as immediate close so the
+			// float quits exactly once.
+			ch <- closeMsg{}
+			close(ch)
+			return
 		}
 		defer f.Close()
+		scanRecords(f, ch)
+	}()
+	return ch
+}
 
-		sc := bufio.NewScanner(f)
-		sc.Split(recordSplitFunc)
-		if sc.Scan() {
-			rec := sc.Text()
-			cmd, args := decodeRecord(rec)
-			switch cmd {
-			case "close":
-				return closeMsg{}
-			case "status":
-				label := ""
-				if len(args) > 0 {
-					label = strings.Join(args, recUS)
-				}
-				return statusMsg(label)
+// scanRecords reads framed records from r until "close" or EOF, mapping each:
+//   - "status" → statusMsg(label)
+//   - "close"  → closeMsg{} (then stop)
+//
+// On EOF (writer gone) without an explicit close it emits exactly one closeMsg.
+// It ALWAYS closes ch on return. A single read carrying several records (e.g.
+// "status…␞close␞") yields one msg per record — the trailing close is never
+// discarded because a single persistent scanner drains the buffer. It is
+// separated from the fifo os.Open so it can be tested against any io.Reader.
+func scanRecords(r io.Reader, ch chan<- tea.Msg) {
+	defer close(ch)
+
+	sc := bufio.NewScanner(r)
+	sc.Split(recordSplitFunc)
+	for sc.Scan() {
+		cmd, args := decodeRecord(sc.Text())
+		switch cmd {
+		case "close":
+			ch <- closeMsg{}
+			return
+		case "status":
+			label := ""
+			if len(args) > 0 {
+				label = strings.Join(args, recUS)
 			}
+			ch <- statusMsg(label)
 		}
-		// EOF or unknown record — keep waiting via a re-issued read
-		return statusMsg("Processing…")
+		// Unknown records are ignored; the scanner keeps draining.
+	}
+	// EOF / writer gone with no explicit close — quit exactly once.
+	ch <- closeMsg{}
+}
+
+// nextRecord returns a tea.Cmd that blocks until the next record arrives on ch
+// (fed by scanRecords). When ch is closed it yields a single closeMsg so the
+// model quits exactly once. Re-issue it after each statusMsg.
+func nextRecord(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return closeMsg{}
+		}
+		return msg
 	}
 }
 
